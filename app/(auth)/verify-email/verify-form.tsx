@@ -17,12 +17,12 @@ export function VerifyForm() {
     if (code.length < 4) return setError("请输入 6 位验证码");
     setError("");
     setLoading(true);
-    const r = await fetch("/api/auth/verify", {
+    const r = await fetch("/api/auth/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email, code }),
     });
-    const j = await r.json();
+    const j = await r.json();
     setLoading(false);
     if (!j.ok) return setError(j.error ?? "验证失败");
     setMsg("验证成功，正在进入控制台…");

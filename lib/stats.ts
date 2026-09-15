@@ -19,9 +19,9 @@ export type Portfolio = {
 };
 
 export async function portfolioOf(userId: string): Promise<Portfolio> {
-  const relations = await filter<CopyRelation>("copyRelations", (r) => r.userId === userId);
-  const trades = await filter<Trade>("trades", (t) => t.userId === userId);
-  const traders = await getTraders();
+  const relations = await filter<CopyRelation>("copyRelations", (r) => r.userId === userId);
+  const trades = await filter<Trade>("trades", (t) => t.userId === userId);
+  const traders = await getTraders();
 
   const capital = relations.reduce((a, r) => a + r.capital, 0);
   const totalPnl = relations.reduce((a, r) => a + r.pnl, 0);
@@ -72,7 +72,7 @@ export async function portfolioOf(userId: string): Promise<Portfolio> {
 }
 
 export async function pnlByDay(userId: string) {
-  const trades = await filter<Trade>("trades", (t) => t.userId === userId && t.status === "closed");
+  const trades = await filter<Trade>("trades", (t) => t.userId === userId && t.status === "closed");
   const buckets = new Map<string, number>();
   for (let i = 13; i >= 0; i--) {
     const d = new Date(Date.now() - i * 86400000);
@@ -88,7 +88,7 @@ export async function pnlByDay(userId: string) {
 }
 
 export async function exchangeBreakdown(userId: string) {
-  const trades = await filter<Trade>("trades", (t) => t.userId === userId);
+  const trades = await filter<Trade>("trades", (t) => t.userId === userId);
   const map = new Map<string, { exchange: string; trades: number; pnl: number }>();
   trades.forEach((t) => {
     const cur = map.get(t.exchange) ?? { exchange: t.exchange, trades: 0, pnl: 0 };
@@ -100,7 +100,7 @@ export async function exchangeBreakdown(userId: string) {
 }
 
 export async function recentTrades(userId: string, limit = 8) {
-  const rows = await all<Trade>("trades");
+  const rows = await all<Trade>("trades");
   return rows
     .filter((t) => t.userId === userId)
     .sort((a, b) => b.ts - a.ts)

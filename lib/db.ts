@@ -12,13 +12,13 @@ async function db(): Promise<DB> {
 }
 
 async function col<T = AnyRec>(name: string): Promise<T[]> {
-  const d = await db();
+  const d = await db();
   if (!d[name]) d[name] = [];
   return d[name] as unknown as T[];
 }
 
 async function commit(d: DB): Promise<void> {
-  await writeDB(d);
+  await writeDB(d);
 }
 
 export async function collection<T = AnyRec>(name: string): Promise<T[]> {
@@ -26,23 +26,37 @@ export async function collection<T = AnyRec>(name: string): Promise<T[]> {
 }
 
 export async function all<T = AnyRec>(name: string): Promise<T[]> {
-  return (await col<T>(name)).slice();
+  return (await col<T>(name)).slice();
 }
 
 export async function find<T = AnyRec>(name: string, pred: (r: T) => boolean): Promise<T | undefined> {
-  return (await col<T>(name)).find(pred as any);
+  return (await col<T>(name)).find(pred as any);
 }
 
 export async function filter<T = AnyRec>(name: string, pred: (r: T) => boolean): Promise<T[]> {
-  return (await col<T>(name)).filter(pred as any);
+  return (await col<T>(name)).filter(pred as any);
 }
 
 export async function insert<T extends AnyRec>(name: string, rec: T): Promise<T> {
-  const d = await db();
+  const d = await db();
   if (!d[name]) d[name] = [];
   d[name].push(rec);
-  await commit(d);
+  await commit(d);
   return rec;
+}
+
+/**
+ * 批量插入：只落盘一次。
+ * 在边缘环境里这点很关键 —— 每次 commit 都是一次整库 KV 往返，
+ * 逐条 insert 几十条数据会直接撞上 Worker 的 CPU/时长上限。
+ */
+export async function insertMany<T extends AnyRec>(name: string, recs: T[]): Promise<T[]> {
+  if (!recs.length) return recs;
+  const d = await db();
+  if (!d[name]) d[name] = [];
+  (d[name] as unknown as T[]).push(...recs);
+  await commit(d);
+  return recs;
 }
 
 export async function update<T extends AnyRec>(
@@ -50,51 +64,51 @@ export async function update<T extends AnyRec>(
   pred: (r: T) => boolean,
   patch: Partial<T>
 ): Promise<T | undefined> {
-  const d = await db();
+  const d = await db();
   const list = (d[name] || []) as unknown as T[];
   const idx = list.findIndex(pred as any);
   if (idx === -1) return undefined;
   list[idx] = { ...list[idx], ...patch };
   d[name] = list as unknown as AnyRec[];
-  await commit(d);
+  await commit(d);
   return list[idx];
 }
 
 export async function upsert<T extends AnyRec>(name: string, pred: (r: T) => boolean, make: () => T): Promise<T> {
-  const existing = await find<T>(name, pred);
+  const existing = await find<T>(name, pred);
   if (existing) return existing;
   const rec = make();
-  await insert<T>(name, rec);
+  await insert<T>(name, rec);
   return rec;
 }
 
 export async function remove(name: string, pred: (r: AnyRec) => boolean): Promise<number> {
-  const d = await db();
+  const d = await db();
   const list = d[name] || [];
   const before = list.length;
   d[name] = list.filter((r) => !pred(r));
-  await commit(d);
+  await commit(d);
   return before - d[name].length;
 }
 
 export async function count(name: string, pred?: (r: AnyRec) => boolean): Promise<number> {
-  if (pred) return (await filter(name, pred)).length;
-  return (await col(name)).length;
+  if (pred) return (await filter(name, pred)).length;
+  return (await col(name)).length;
 }
 
 /** 原子地读-改-写整张表，避免多步读写的竞态 */
 export async function mutate<T = AnyRec>(name: string, fn: (rows: T[]) => T[] | void): Promise<T[]> {
-  const d = await db();
+  const d = await db();
   if (!d[name]) d[name] = [];
   const rows = d[name] as unknown as T[];
   const next = fn(rows) || rows;
   d[name] = next as unknown as AnyRec[];
-  await commit(d);
+  await commit(d);
   return next;
 }
 
 export async function reset(): Promise<void> {
-  await writeDB({});
+  await writeDB({});
 }
 
 /* ---------------- 纯函数（同步，无副作用） ---------------- */
@@ -127,15 +141,15 @@ export function hashString(s: string): number {
 /* ---------------- 种子数据标记 ---------------- */
 
 export async function isSeeded(): Promise<boolean> {
-  const rows = await filter<any>("meta", (m) => m.key === "seeded");
+  const rows = await filter<any>("meta", (m) => m.key === "seeded");
   return rows.length > 0;
 }
 
 export async function markSeeded(version = 2): Promise<void> {
-  await upsert<any>("meta", (m) => m.key === "seeded", () => ({ key: "seeded", version, at: Date.now() }));
+  await upsert<any>("meta", (m) => m.key === "seeded", () => ({ key: "seeded", version, at: Date.now() }));
 }
 
 export async function dbPath(): Promise<string> {
-  const { isEdge } = await import("@/lib/store");
-  return (await isEdge()) ? "cloudflare-kv://coince-db/db:v2" : ".data/db.json";
+  const { isEdge } = await import("@/lib/store");
+  return (await isEdge()) ? "cloudflare-kv://coince-db/db:v2" : ".data/db.json";
 }

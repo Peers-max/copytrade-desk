@@ -5,11 +5,18 @@ import {
   ARPU_NEW,
   ARPU_NOW,
   BUSINESS,
+  CF_INFRA,
+  CF_INFRA_SAVING,
+  CF_INFRA_SAVING_YEAR,
+  CF_INFRA_TOTAL,
+  CF_TAKEAWAYS,
   COST_STRUCTURE,
   COST_TOTAL,
+  COST_TOTAL_CF,
   HEADCOUNT,
   HEADCOUNT_TOTAL,
   INFRA,
+  INFRA_COMPARE,
   INFRA_GROUPS,
   INFRA_TOTAL,
   MARKETING,
@@ -20,11 +27,14 @@ import {
   PRICE_BANDS,
   PROFIT_NOW,
   REVENUE_NOW,
+  SCALE_COMPARE,
   SCALE_TABLE,
+  SCENARIOS_CF,
   SCENARIOS,
   THIRD_PARTY,
   THIRD_PARTY_TOTAL,
   UNIT_ECONOMICS,
+  UNIT_INFRA_CF,
   VARIABLE_TOTAL,
 } from "@/lib/cost-model";
 
@@ -77,6 +87,115 @@ export default function CostReportPage() {
             <a href="/docs/成本测算与定价方案.md" download className="btn-ghost px-6 py-3">
               <Download size={16} /> 下载完整报告（Markdown）
             </a>
+          </div>
+        </div>
+      </section>
+
+      {/* 0. Cloudflare + GitHub 免费层方案 */}
+      <section className="border-b border-border bg-wise-green/[0.04] py-14">
+        <div className="container-x">
+          <SectionTitle
+            align="left"
+            eyebrow="架构优化 · 已在本站点落地"
+            title="零、Cloudflare + GitHub 免费层：基础设施成本降 98.6%"
+            desc="本站点实际部署在 Cloudflare Workers 上。决定性差异是 Cloudflare 不收出口流量费——而出口带宽在传统架构里是第三大开销，且随用户量线性增长。"
+          />
+
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Kpi label="基础设施月成本" value={fmtMoney(CF_INFRA_TOTAL)} sub={`原 ${fmtMoney(INFRA_TOTAL)}`} tone="up" />
+            <Kpi
+              label="降幅"
+              value={`${((CF_INFRA_SAVING / INFRA_TOTAL) * 100).toFixed(1)}%`}
+              sub={`月省 ${fmtMoney(CF_INFRA_SAVING)}`}
+              tone="up"
+            />
+            <Kpi label="年化节省" value={fmtMoney(CF_INFRA_SAVING_YEAR)} sub="含出口带宽归零" tone="up" />
+            <Kpi
+              label="单用户基础设施成本"
+              value={`¥${UNIT_INFRA_CF.toFixed(2)}`}
+              sub={`原 ¥${(INFRA_TOTAL / BUSINESS.paying).toFixed(2)} / 月`}
+              tone="up"
+            />
+          </div>
+
+          <div className="mt-10 grid gap-6 lg:grid-cols-2">
+            {/* 分组对比 */}
+            <div className="rounded-2xl border border-border bg-card p-6">
+              <h3 className="text-sm font-semibold">分组对比（月支出）</h3>
+              <div className="mt-5 space-y-4">
+                {INFRA_COMPARE.map((r) => (
+                  <div key={r.group}>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">{r.group}</span>
+                      <span className="tabular-nums">
+                        <span className="mr-2 text-muted-foreground line-through">{fmtMoney(r.traditional)}</span>
+                        <span className="font-semibold text-wise-green">
+                          {r.cloudflare === 0 ? "¥0" : fmtMoney(r.cloudflare)}
+                        </span>
+                      </span>
+                    </div>
+                    <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-wise-green"
+                        style={{ width: `${Math.max((r.cloudflare / r.traditional) * 100, 1.5)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+                条形长度 = 新方案相对原方案的占比。带宽与 CDN 因 Cloudflare 免收出口流量费直接归零。
+              </p>
+            </div>
+
+            {/* 规模弹性 */}
+            <div className="rounded-2xl border border-border bg-card p-6">
+              <h3 className="text-sm font-semibold">规模弹性：用户翻倍，成本几乎不动</h3>
+              <div className="mt-5 overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="py-2 text-left font-medium">付费用户</th>
+                      <th className="py-2 text-right font-medium">传统架构</th>
+                      <th className="py-2 text-right font-medium">Cloudflare</th>
+                      <th className="py-2 text-right font-medium">单用户</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {SCALE_COMPARE.map((r) => (
+                      <tr key={r.users} className="border-b border-border/50 last:border-0">
+                        <td className="py-2">{r.users.toLocaleString()}</td>
+                        <td className="py-2 text-right tabular-nums text-muted-foreground">{fmtMoney(r.traditional)}</td>
+                        <td className="py-2 text-right tabular-nums font-semibold text-wise-green">
+                          {fmtMoney(r.cloudflare)}
+                        </td>
+                        <td className="py-2 text-right tabular-nums text-muted-foreground">
+                          ¥{(r.cloudflare / r.users).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+                传统架构下 1,000 → 30,000 用户，基础设施涨 9.8 倍；Cloudflare 方案下仅涨
+                {(2600 / 80).toFixed(1)} 倍且绝对值仍不足三千元，边际成本近乎为零。
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-8 grid gap-4 sm:grid-cols-2">
+            {CF_TAKEAWAYS.map((t) => (
+              <div key={t.title} className="rounded-xl border border-border bg-card p-5">
+                <div className="flex items-start gap-3">
+                  <Check size={16} className="mt-0.5 shrink-0 text-wise-green" />
+                  <div>
+                    <p className="text-sm font-semibold">{t.title}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t.desc}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </section>

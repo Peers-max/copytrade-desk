@@ -126,8 +126,8 @@ function makeCurve(seed: number, len: number, drift: number, vol: number): numbe
 }
 
 export async function seedIfNeeded(): Promise<void> {
-  const { isSeeded } = await import("./db");
-  if (await isSeeded()) return;
+  const { isSeeded } = await import("./db");
+  if (await isSeeded()) return;
 
   // 边缘 KV 每一次写入都是一次网络往返，因此先在本地收集，最后一次落盘
   const buffer: Record<string, any[]> = {};
@@ -354,10 +354,10 @@ export async function seedIfNeeded(): Promise<void> {
   });
 
   // 一次性写入后端（本地为 .data/db.json，Cloudflare 为 Workers KV）
-  const db = await readDB();
+  const db = await readDB();
   for (const [k, v] of Object.entries(buffer)) db[k] = v;
   db.meta = [...(db.meta || []), { key: "seeded", version: 2, at: Date.now() }];
-  await writeDB(db);
+  await writeDB(db);
 }
 
 export function getPlans(): Plan[] {
@@ -373,9 +373,9 @@ export async function getStrategies(): Promise<Strategy[]> {
 }
 
 export async function getDemoUser(): Promise<User> {
-  const rows = await all<User>("users");
+  const rows = await all<User>("users");
   const u = rows.find((x) => x.id === "u_demo");
   if (u) return u;
-  await seedIfNeeded();
-  return (await all<User>("users")).find((x) => x.id === "u_demo")!;
+  await seedIfNeeded();
+  return (await all<User>("users")).find((x) => x.id === "u_demo")!;
 }

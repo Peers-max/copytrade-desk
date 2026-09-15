@@ -17,7 +17,7 @@ const ITEMS: MallItem[] = [
 ];
 
 export default async function MallPage() {
-  const user = (await getSessionUser())!;
+  const user = (await getSessionUser())!;
   const points = 2480;
   const earned = 1240;
   const spent = 760;

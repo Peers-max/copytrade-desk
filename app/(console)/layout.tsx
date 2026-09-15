@@ -2,15 +2,13 @@ import { redirect } from "next/navigation";
 import { ConsoleSidebar } from "@/components/console/sidebar";
 import { getSessionUser } from "@/lib/auth";
 import { count } from "@/lib/db";
-import { seedIfNeeded } from "@/lib/seed";
 import { PLANS } from "@/lib/seed";
 
 export default async function ConsoleLayout({ children }: { children: React.ReactNode }) {
-  seedIfNeeded();
-  const user = await getSessionUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login?next=/dashboard");
 
-  const unread = await count("notifications", (n: any) => n.userId === user.id && !n.read);
+  const unread = await count("notifications", (n: any) => n.userId === user.id && !n.read);
   const planName = PLANS.find((p) => p.id === user.planId)?.name ?? "免费版";
 
   return (

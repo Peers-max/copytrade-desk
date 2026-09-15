@@ -16,7 +16,7 @@ export default function LoginPage() {
       <div className="rounded-card-lg border border-border bg-card p-7 shadow-card">
         <h1 className="text-[22px] font-bold tracking-tight">登录 / 注册</h1>
         <p className="mt-1.5 text-[13px] text-muted-foreground">
-          使用邮箱验证码登录，无需密码。邮箱验证 30 秒搞定。
+          使用账号密码登录，或改用邮箱验证码，无需记住密码。
         </p>
         <Suspense fallback={<div className="mt-6 h-40 animate-pulse rounded-2xl bg-surface" />}>
           <LoginForm />

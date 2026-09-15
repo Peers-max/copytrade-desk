@@ -23,10 +23,10 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   seedIfNeeded();
-  const user = (await getSessionUser())!;
+  const user = (await getSessionUser())!;
   const p = await portfolioOf(user.id);
-  const relations = await filter<CopyRelation>("copyRelations", (r) => r.userId === user.id);
-  const traders = await getTraders();
+  const relations = await filter<CopyRelation>("copyRelations", (r) => r.userId === user.id);
+  const traders = await getTraders();
   const trades = await recentTrades(user.id, 7);
   const market = buildMarket();
   const plan = PLANS.find((x) => x.id === user.planId) ?? PLANS[0];

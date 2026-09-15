@@ -15,13 +15,13 @@ export const metadata = { title: "数据看板" };
 export default async function DataBoardPage() {
   seedIfNeeded();
   const market = buildMarket();
-  const traders = await getTraders();
-  const user = (await getSessionUser())!;
-  const trades = await filter<Trade>("trades", (t) => t.userId === user.id);
+  const traders = await getTraders();
+  const user = (await getSessionUser())!;
+  const trades = await filter<Trade>("trades", (t) => t.userId === user.id);
   const byDay = await pnlByDay(user.id);
   const exBreak = await exchangeBreakdown(user.id);
 
-  const totalSignals = (await all("signals")).length;
+  const totalSignals = (await all("signals")).length;
   const closed = trades.filter((t) => t.status === "closed");
   const winRate = closed.length ? (closed.filter((t) => t.pnl > 0).length / closed.length) * 100 : 0;
   const totalVolume = trades.reduce((a, t) => a + t.entry * t.qty, 0);

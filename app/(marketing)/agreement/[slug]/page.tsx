@@ -88,7 +88,7 @@ export function generateStaticParams() {
 }
 
 export default async function AgreementPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
+  const { slug } = await params;
   const doc = DOCS[slug];
   if (!doc) notFound();
   return <LegalDoc {...doc} />;

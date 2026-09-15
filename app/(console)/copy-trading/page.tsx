@@ -9,8 +9,8 @@ export const metadata = { title: "跟单交易" };
 
 export default async function CopyTradingPage() {
   seedIfNeeded();
-  const user = (await getSessionUser())!;
-  const traders = await getTraders();
-  const relations = await filter<CopyRelation>("copyRelations", (r) => r.userId === user.id);
+  const user = (await getSessionUser())!;
+  const traders = await getTraders();
+  const relations = await filter<CopyRelation>("copyRelations", (r) => r.userId === user.id);
   return <CopyTradingClient traders={traders} relations={relations} />;
 }

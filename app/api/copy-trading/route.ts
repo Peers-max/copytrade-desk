@@ -6,15 +6,15 @@ import type { CopyRelation } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const user = await getSessionUser();
+  const user = await getSessionUser();
   if (!user) return NextResponse.json({ ok: false, error: "未登录" }, { status: 401 });
-  return NextResponse.json({ ok: true, relations: await filter<CopyRelation>("copyRelations", (r) => r.userId === user.id) });
+  return NextResponse.json({ ok: true, relations: await filter<CopyRelation>("copyRelations", (r) => r.userId === user.id) });
 }
 
 export async function POST(req: NextRequest) {
-  const user = await getSessionUser();
+  const user = await getSessionUser();
   if (!user) return NextResponse.json({ ok: false, error: "未登录" }, { status: 401 });
-  const b = await req.json().catch(() => ({}));
+  const b = await req.json().catch(() => ({}));
   if (!b.traderId || !b.capital) {
     return NextResponse.json({ ok: false, error: "请选择交易员并填写跟单资金" }, { status: 400 });
   }
@@ -34,23 +34,23 @@ export async function POST(req: NextRequest) {
     createdAt: Date.now(),
     copiedTrades: 0,
   };
-  await insert<CopyRelation>("copyRelations", rel);
+  await insert<CopyRelation>("copyRelations", rel);
   return NextResponse.json({ ok: true, relation: rel });
 }
 
 export async function PATCH(req: NextRequest) {
-  const user = await getSessionUser();
+  const user = await getSessionUser();
   if (!user) return NextResponse.json({ ok: false, error: "未登录" }, { status: 401 });
-  const { id, ...patch } = await req.json().catch(() => ({}));
-  await update<CopyRelation>("copyRelations", (r) => r.id === id && r.userId === user.id, patch);
+  const { id, ...patch } = await req.json().catch(() => ({}));
+  await update<CopyRelation>("copyRelations", (r) => r.id === id && r.userId === user.id, patch);
   return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(req: NextRequest) {
-  const user = await getSessionUser();
+  const user = await getSessionUser();
   if (!user) return NextResponse.json({ ok: false, error: "未登录" }, { status: 401 });
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ ok: false, error: "缺少 id" }, { status: 400 });
-  await remove("copyRelations", (r) => r.id === id && r.userId === user.id);
+  await remove("copyRelations", (r) => r.id === id && r.userId === user.id);
   return NextResponse.json({ ok: true });
 }

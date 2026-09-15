@@ -196,3 +196,77 @@ export const SCALE_TABLE = [
   { users: 10000, cost: 43000 },
   { users: 30000, cost: 113000 },
 ].map((r) => ({ ...r, per: r.cost / r.users }));
+
+/* ==================================================================
+ * Cloudflare + GitHub 免费层方案（当前站点实际采用的架构）
+ *
+ * 关键变化：Cloudflare 不收出口流量费（egress free），
+ * 而出口带宽在传统云架构里是第三大开销（¥4,515/月）。
+ * 这一项归零，叠加 Workers / KV / R2 的免费额度，
+ * 基础设施成本从 ¥16,615/月 降到百元量级。
+ * ================================================================== */
+
+export const CF_INFRA = [
+  { group: "计算", name: "Cloudflare Workers（请求 + CPU 时长）", cost: 144 },
+  { group: "数据库与缓存", name: "Workers KV（用户 / 会话 / 订单 / 通知）", cost: 36 },
+  { group: "数据库与缓存", name: "Next.js 增量缓存 KV", cost: 0 },
+  { group: "带宽与 CDN", name: "静态资源分发 — Cloudflare 免收出口流量费", cost: 0 },
+  { group: "带宽与 CDN", name: "API / 实时推送出网 — 免收出口流量费", cost: 0 },
+  { group: "存储", name: "R2 对象存储（10GB 免费额度内）", cost: 0 },
+  { group: "存储", name: "D1 / 备份（免费额度内）", cost: 0 },
+  { group: "容灾", name: "边缘多节点天然容灾 + WAF / SSL / 域名", cost: 0 },
+  { group: "容灾", name: "Observability 日志与指标（免费额度 + 少量）", cost: 50 },
+];
+
+export const CF_INFRA_TOTAL = CF_INFRA.reduce((a, b) => a + b.cost, 0); // 230
+
+/** 传统云架构 vs Cloudflare 免费层：分组对比 */
+export const INFRA_COMPARE = INFRA_GROUPS.map((g) => ({
+  group: g.name,
+  traditional: g.value,
+  cloudflare: CF_INFRA.filter((i) => i.group === g.name).reduce((a, b) => a + b.cost, 0),
+}));
+
+export const CF_INFRA_SAVING = INFRA_TOTAL - CF_INFRA_TOTAL; // 16385
+export const CF_INFRA_SAVING_YEAR = CF_INFRA_SAVING * 12;
+
+/** 采用 Cloudflare 后的全成本与单用户成本 */
+export const COST_TOTAL_CF = COST_TOTAL - INFRA_TOTAL + CF_INFRA_TOTAL; // 404689
+export const UNIT_INFRA_CF = CF_INFRA_TOTAL / BUSINESS.paying;
+
+/** 规模弹性对比：传统架构随用户线性增长，CF 方案边际成本极低 */
+export const SCALE_COMPARE = [
+  { users: 1000, traditional: 11500, cloudflare: 80 },
+  { users: 3000, traditional: 16500, cloudflare: 230 },
+  { users: 5000, traditional: 21500, cloudflare: 420 },
+  { users: 10000, traditional: 43000, cloudflare: 900 },
+  { users: 30000, traditional: 113000, cloudflare: 2600 },
+];
+
+/** 采用 CF 后重算的降价情景（成本侧扣减基础设施节省） */
+export const SCENARIOS_CF = SCENARIOS.map((s) => {
+  const scale = s.users / BUSINESS.paying;
+  const cost = s.cost - INFRA_TOTAL + Math.round(CF_INFRA_TOTAL * scale);
+  const revenue = s.arpu * s.users * FX;
+  return { ...s, cost, revenue, profit: revenue - cost, margin: (revenue - cost) / revenue };
+});
+
+/** Cloudflare 免费层的关键结论 */
+export const CF_TAKEAWAYS = [
+  {
+    title: "带宽成本归零，这是最大的一笔",
+    desc: "传统架构里 CDN + 源站出网占 ¥4,515/月。Cloudflare 不收出口流量费，这一项直接归零，且用户越多省得越多。",
+  },
+  {
+    title: "基础设施从 ¥16,615 降到约 ¥230，降幅 98.6%",
+    desc: "Workers / KV / R2 / WAF / SSL / 自定义域名均在免费额度内，年省约 ¥19.7 万。",
+  },
+  {
+    title: "但要清醒：基础设施只占总成本 4%",
+    desc: "人力 ¥19.85 万与营销 ¥12 万才是大头。单靠换云支撑不了腰斩式降价，它真正的价值在于——用户规模扩张时基础设施成本几乎不增长。",
+  },
+  {
+    title: "因此降价应服务于「换量」，而不是「让利」",
+    desc: "边际成本被压到 ¥0.08/人/月 后，多获客一位的增量成本极低，用降价换规模在财务上首次真正成立。",
+  },
+];

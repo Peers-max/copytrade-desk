@@ -17,7 +17,7 @@ const REFERRALS = [
 ];
 
 export default async function PromotionPage() {
-  const user = (await getSessionUser())!;
+  const user = (await getSessionUser())!;
   const totalCommission = REFERRALS.reduce((a, r) => a + r.commission, 0);
 
   return (

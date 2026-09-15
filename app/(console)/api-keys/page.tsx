@@ -9,7 +9,7 @@ export const metadata = { title: "API 管理" };
 
 export default async function ApiKeysPage() {
   seedIfNeeded();
-  const user = (await getSessionUser())!;
-  const keys = await filter<ApiKey>("apiKeys", (k) => k.userId === user.id);
+  const user = (await getSessionUser())!;
+  const keys = await filter<ApiKey>("apiKeys", (k) => k.userId === user.id);
   return <ApiKeysClient keys={keys} exchanges={EXCHANGES} />;
 }

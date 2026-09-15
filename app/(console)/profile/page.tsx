@@ -13,11 +13,11 @@ export const metadata = { title: "个人中心" };
 
 export default async function ProfilePage() {
   seedIfNeeded();
-  const user = (await getSessionUser())!;
+  const user = (await getSessionUser())!;
   const plan = PLANS.find((p) => p.id === user.planId) ?? PLANS[0];
-  const keys = await filter<ApiKey>("apiKeys", (k) => k.userId === user.id);
-  const copies = await count("copyRelations", (r: any) => r.userId === user.id);
-  const unread = await count("notifications", (n: any) => n.userId === user.id && !n.read);
+  const keys = await filter<ApiKey>("apiKeys", (k) => k.userId === user.id);
+  const copies = await count("copyRelations", (r: any) => r.userId === user.id);
+  const unread = await count("notifications", (n: any) => n.userId === user.id && !n.read);
 
   return (
     <>

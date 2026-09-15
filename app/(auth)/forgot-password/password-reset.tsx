@@ -19,12 +19,12 @@ export function PasswordReset({ mode }: { mode: "request" | "reset" }) {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return setError("请输入有效的邮箱地址");
     setError("");
     setLoading(true);
-    const r = await fetch("/api/auth/send-code", {
+    const r = await fetch("/api/auth/send-code", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email }),
     });
-    const j = await r.json();
+    const j = await r.json();
     setLoading(false);
     if (!j.ok) return setError(j.error ?? "发送失败");
     setMsg(`验证码已发送（演示环境：${j.code}）`);
@@ -37,7 +37,7 @@ export function PasswordReset({ mode }: { mode: "request" | "reset" }) {
     if (pw !== pw2) return setError("两次输入的密码不一致");
     setError("");
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 700));
+    await new Promise((r) => setTimeout(r, 700));
     setLoading(false);
     setMsg("密码已重置，正在跳转登录…");
     setTimeout(() => router.push("/login"), 800);

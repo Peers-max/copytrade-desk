@@ -8,8 +8,8 @@ export const metadata = { title: "我的策略" };
 
 export default async function MyStrategyPage() {
   seedIfNeeded();
-  const user = (await getSessionUser())!;
-  const strategies = await getStrategies();
-  const subs = await filter<any>("strategySubs", (s) => s.userId === user.id);
+  const user = (await getSessionUser())!;
+  const strategies = await getStrategies();
+  const subs = await filter<any>("strategySubs", (s) => s.userId === user.id);
   return <MyStrategyClient strategies={strategies} subs={subs} />;
 }

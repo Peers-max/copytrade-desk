@@ -2,8 +2,9 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { ArrowRight, LoaderCircle, Mail, ShieldCheck } from "lucide-react";
+import { ArrowRight, KeyRound, LoaderCircle, Mail, ShieldCheck, User } from "lucide-react";
 
+type Tab = "password" | "email";
 type Step = "email" | "code";
 
 export function LoginForm() {
@@ -11,13 +12,47 @@ export function LoginForm() {
   const params = useSearchParams();
   const next = params.get("next") || "/dashboard";
 
+  const [tab, setTab] = useState<Tab>("password");
+
+  // 账号密码
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+
+  // 邮箱验证码
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [hint, setHint] = useState("");
   const [countdown, setCountdown] = useState(0);
+
+  function done() {
+    router.push(next);
+    router.refresh();
+  }
+
+  async function loginWithPassword() {
+    if (!username.trim() || !password) {
+      setError("请输入用户名与密码");
+      return;
+    }
+    setError("");
+    setLoading(true);
+    const r = await fetch("/api/auth/admin-login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: username.trim(), password }),
+    });
+    const j = await r.json().catch(() => ({}));
+    setLoading(false);
+    if (!j.ok) {
+      setError(j.error ?? "登录失败");
+      return;
+    }
+    done();
+  }
 
   async function sendCode(e?: string) {
     const target = e ?? email;
@@ -27,12 +62,12 @@ export function LoginForm() {
     }
     setError("");
     setLoading(true);
-    const r = await fetch("/api/auth/send-code", {
+    const r = await fetch("/api/auth/send-code", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: target }),
     });
-    const j = await r.json();
+    const j = await r.json();
     setLoading(false);
     if (!j.ok) {
       setError(j.error ?? "发送失败");
@@ -59,19 +94,18 @@ export function LoginForm() {
     }
     setError("");
     setLoading(true);
-    const r = await fetch("/api/auth/verify", {
+    const r = await fetch("/api/auth/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email, code }),
     });
-    const j = await r.json();
+    const j = await r.json();
     setLoading(false);
     if (!j.ok) {
       setError(j.error ?? "登录失败");
       return;
     }
-    router.push(next);
-    router.refresh();
+    done();
   }
 
   async function useDemo() {
@@ -79,27 +113,75 @@ export function LoginForm() {
     setCode("888888");
     setError("");
     setLoading(true);
-    await fetch("/api/auth/send-code", {
+    await fetch("/api/auth/send-code", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "demo@coince.io" }),
     });
-    const r = await fetch("/api/auth/verify", {
+    const r = await fetch("/api/auth/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "demo@coince.io", code: "888888" }),
     });
-    const j = await r.json();
+    const j = await r.json();
     setLoading(false);
-    if (j.ok) {
-      router.push(next);
-      router.refresh();
-    } else setError("演示登录失败，请重试");
+    if (j.ok) done();
+    else setError("演示登录失败，请重试");
   }
+
+  const tabBtn = (active: boolean) =>
+    `flex-1 rounded-xl py-2 text-[13px] font-medium transition ${
+      active ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+    }`;
 
   return (
     <div className="mt-6">
-      {step === "email" ? (
+      <div className="mb-4 flex gap-1 rounded-2xl border border-border bg-surface p-1">
+        <button type="button" onClick={() => { setTab("password"); setError(""); }} className={tabBtn(tab === "password")}>
+          账号密码
+        </button>
+        <button type="button" onClick={() => { setTab("email"); setError(""); }} className={tabBtn(tab === "email")}>
+          邮箱验证码
+        </button>
+      </div>
+
+      {tab === "password" ? (
+        <div className="space-y-3">
+          <label className="block">
+            <span className="text-[12.5px] font-medium">用户名</span>
+            <div className="mt-1.5 flex items-center gap-2 rounded-2xl border border-border bg-background px-3.5 py-2.5 focus-within:border-wise-green">
+              <User size={16} className="text-muted-foreground" />
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="用户名"
+                autoComplete="username"
+                className="w-full bg-transparent text-[14px] outline-none placeholder:text-muted-foreground/60"
+              />
+            </div>
+          </label>
+          <label className="block">
+            <span className="text-[12.5px] font-medium">密码</span>
+            <div className="mt-1.5 flex items-center gap-2 rounded-2xl border border-border bg-background px-3.5 py-2.5 focus-within:border-wise-green">
+              <KeyRound size={16} className="text-muted-foreground" />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && loginWithPassword()}
+                placeholder="密码"
+                autoComplete="current-password"
+                className="w-full bg-transparent text-[14px] outline-none placeholder:text-muted-foreground/60"
+              />
+            </div>
+          </label>
+          {error ? <p className="text-[12.5px] text-[#f6465d]">{error}</p> : null}
+          <button onClick={loginWithPassword} disabled={loading} className="btn-primary w-full py-3">
+            {loading ? <LoaderCircle size={16} className="animate-spin" /> : null} 登录
+            {!loading ? <ArrowRight size={16} /> : null}
+          </button>
+        </div>
+      ) : step === "email" ? (
         <div className="space-y-3">
           <label className="block">
             <span className="text-[12.5px] font-medium">邮箱</span>

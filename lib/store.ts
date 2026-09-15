@@ -51,7 +51,7 @@ async function kvBinding(): Promise<KVLike | null> {
 
 /** 是否运行在 Cloudflare 边缘（有 KV 绑定） */
 export async function isEdge(): Promise<boolean> {
-  return (await kvBinding()) !== null;
+  return (await kvBinding()) !== null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -63,8 +63,8 @@ const DB_FILE_NAME = "db.json";
 
 async function fileRead(): Promise<DB | null> {
   try {
-    const fs = await import("node:fs");
-    const path = await import("node:path");
+    const fs = await import("node:fs");
+    const path = await import("node:path");
     const file = path.join(process.cwd(), DATA_DIR_NAME, DB_FILE_NAME);
     if (!fs.existsSync(file)) return null;
     const raw = fs.readFileSync(file, "utf8");
@@ -76,8 +76,8 @@ async function fileRead(): Promise<DB | null> {
 
 async function fileWrite(db: DB): Promise<void> {
   try {
-    const fs = await import("node:fs");
-    const path = await import("node:path");
+    const fs = await import("node:fs");
+    const path = await import("node:path");
     const dir = path.join(process.cwd(), DATA_DIR_NAME);
     const file = path.join(dir, DB_FILE_NAME);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -103,17 +103,17 @@ let cacheAt = 0;
 const CACHE_TTL_MS = 1000;
 
 export async function readDB(): Promise<DB> {
-  const kv = await kvBinding();
+  const kv = await kvBinding();
   if (kv) {
     const now = Date.now();
     if (cache && now - cacheAt < CACHE_TTL_MS) return cache;
-    const data = await kv.get(KV_KEY, "json");
+    const data = await kv.get(KV_KEY, "json");
     cache = (data as DB) || {};
     cacheAt = now;
     return cache;
   }
   if (cache) return cache;
-  cache = (await fileRead()) || {};
+  cache = (await fileRead()) || {};
   cacheAt = Date.now();
   return cache;
 }
@@ -121,12 +121,12 @@ export async function readDB(): Promise<DB> {
 export async function writeDB(db: DB): Promise<void> {
   cache = db;
   cacheAt = Date.now();
-  const kv = await kvBinding();
+  const kv = await kvBinding();
   if (kv) {
-    await kv.put(KV_KEY, JSON.stringify(db));
+    await kv.put(KV_KEY, JSON.stringify(db));
     return;
   }
-  await fileWrite(db);
+  await fileWrite(db);
 }
 
 /** 丢弃内存缓存，强制下次从后端重新读（用于测试或跨请求强制刷新） */
