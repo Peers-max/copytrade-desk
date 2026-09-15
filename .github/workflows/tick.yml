@@ -31,7 +31,9 @@ jobs:
           TICK_TOKEN: ${{ secrets.TICK_TOKEN }}
         run: |
           if [ -z "$WORKER_URL" ] || [ -z "$TICK_TOKEN" ]; then
-            echo "未配置 WORKER_URL / TICK_TOKEN，跳过本轮。"
+            # 用 warning 而不是静默 exit 0：否则缺密钥时任务显示绿色成功，
+            # 看起来一切正常，实则每 5 分钟空跑一轮，极难察觉。
+            echo "::warning::未配置 WORKER_URL / TICK_TOKEN，本轮空跑。请在仓库 Settings → Secrets and variables → Actions 中补齐。"
             exit 0
           fi
           code=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
