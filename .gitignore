@@ -1,0 +1,33 @@
+# 依赖
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+
+# OpenNext / Cloudflare 构建产物
+.open-next/
+.wrangler/
+.vercel/
+
+# 本地数据（仅开发用，线上走 Workers KV）
+.data/
+
+# 源站抓取的原始素材（仅用于对照还原，不入库）
+_src/
+
+# 环境变量
+.env
+.env*.local
+
+# 日志与系统文件
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# 本地工作数据
+.workbuddy/

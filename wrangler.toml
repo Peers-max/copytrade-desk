@@ -1,0 +1,40 @@
+# ============================================================
+# coince.io 复刻站 —— Cloudflare Workers (OpenNext) 部署配置
+# 构建：npm run cf:build   （产出 .open-next/）
+# 发布：npm run cf:deploy
+# ============================================================
+
+name = "coince"
+main = ".open-next/worker.js"
+
+compatibility_date = "2026-09-15"
+compatibility_flags = ["nodejs_compat"]
+
+# Next.js 静态资源（由 OpenNext 构建产出）
+[assets]
+binding = "ASSETS"
+directory = ".open-next/assets"
+
+# 业务数据存储：用户 / 会话 / 跟单关系 / 订单 / 通知 / 发票
+[[kv_namespaces]]
+binding = "COINCE_KV"
+id = "583c0b65b15f47b698718cfb3c439f90"
+
+# Next.js 增量缓存（ISR / fetch 缓存）
+[[kv_namespaces]]
+binding = "NEXT_INC_CACHE_KV"
+id = "583c0b65b15f47b698718cfb3c439f90"
+
+# 生产环境绑定自定义域名：coince.138148178.xyz
+[[routes]]
+pattern = "coince.138148178.xyz"
+custom_domain = true
+
+[observability]
+enabled = true
+
+# ------------------------------------------------------------
+# 环境变量（如需覆盖，用 wrangler secret put 写入敏感值）
+# ------------------------------------------------------------
+[vars]
+NEXT_PUBLIC_SITE_URL = "https://coince.138148178.xyz"
