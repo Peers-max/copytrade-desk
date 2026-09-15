@@ -10,15 +10,24 @@ import type { Plan, Strategy, Trader } from "./types";
  * 真实存在的信号源，收益/胜率/跟单人数一律由真实成交记录统计得出。
  */
 
+/**
+ * 交易所清单。
+ *
+ * `tradable` = 是否已实现实盘下单适配器（见 lib/exchanges/）。
+ * `blockedFromWorker` = 2026-09 在 Cloudflare Workers 上实测的**出网可达性**：
+ *   Cloudflare 的出口 IP 会被这些交易所直接拒绝（币安 403/451、Bybit 403）。
+ *   适配器本身没问题，换到非 Cloudflare 的主机部署即可用，所以这里不把它们
+ *   标成「不支持」，而是明确提示「当前部署环境下不可用」。
+ */
 export const EXCHANGES = [
-  { id: "binance", name: "Binance", cn: "币安", tradable: true },
-  { id: "okx", name: "OKX", cn: "欧易", tradable: true },
-  { id: "bybit", name: "Bybit", cn: "Bybit", tradable: false },
-  { id: "bitget", name: "Bitget", cn: "Bitget", tradable: false },
-  { id: "gate", name: "Gate", cn: "Gate.io", tradable: false },
-  { id: "htx", name: "HTX", cn: "火币 HTX", tradable: false },
-  { id: "bitmart", name: "BitMart", cn: "BitMart", tradable: false },
-  { id: "hotcoin", name: "Hotcoin", cn: "热币", tradable: false },
+  { id: "binance", name: "Binance", cn: "币安", tradable: true, blockedFromWorker: true },
+  { id: "okx", name: "OKX", cn: "欧易", tradable: true, blockedFromWorker: false },
+  { id: "bybit", name: "Bybit", cn: "Bybit", tradable: false, blockedFromWorker: true },
+  { id: "bitget", name: "Bitget", cn: "Bitget", tradable: false, blockedFromWorker: false },
+  { id: "gate", name: "Gate", cn: "Gate.io", tradable: false, blockedFromWorker: false },
+  { id: "htx", name: "HTX", cn: "火币 HTX", tradable: false, blockedFromWorker: false },
+  { id: "bitmart", name: "BitMart", cn: "BitMart", tradable: false, blockedFromWorker: false },
+  { id: "hotcoin", name: "Hotcoin", cn: "热币", tradable: false, blockedFromWorker: false },
 ];
 
 export const SYMBOLS = [

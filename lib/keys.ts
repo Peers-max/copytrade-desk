@@ -104,6 +104,20 @@ export async function bindApiKey(userId: string, input: BindInput): Promise<Bind
 
 /** 把交易所返回的英文错误翻译成用户能照做的中文提示。 */
 function friendlyError(msg: string): string {
+  // 出网被拒：这是本部署环境（Cloudflare Workers）最常见的失败，
+  // 实测币安返回 403/451、Bybit 返回 403 —— 报文里往往只有一句 "fetch failed"，
+  // 不翻译的话用户根本不知道发生了什么。
+  if (/fetch failed|failed to fetch|aborted|AbortError|timeout|ECONN|ENOTFOUND|ETIMEDOUT|network/i.test(msg)) {
+    return (
+      "网络不可达：本服务部署在 Cloudflare Workers 上，币安与 Bybit 会拒绝其出口 IP" +
+      "（实测币安 403/451「restricted location」、Bybit 403 地区封锁），因此这两家在当前" +
+      "部署下无法下单。请改用 OKX（实测可用）；如必须用币安，需要把执行层部署到非 Cloudflare 的主机。" +
+      "可访问 /api/diag 查看实时出网探测结果。"
+    );
+  }
+  if (/403|Forbidden|451/.test(msg)) {
+    return "交易所拒绝了本服务的出口 IP（403/451 地区限制）。可访问 /api/diag 查看是哪一环被挡。";
+  }
   if (/invalid api-key|api-key format invalid|Invalid API key/i.test(msg)) {
     return "API Key 无效：请检查是否复制完整、是否与 Secret 属于同一组。";
   }
@@ -113,7 +127,7 @@ function friendlyError(msg: string): string {
   if (/-1021|timestamp|Timestamp/i.test(msg)) {
     return "时间戳超窗：请检查服务器时间是否准确（币安要求误差小于 1 秒）。";
   }
-  if (/IP|whitelist|not in the whitelist|-2015/i.test(msg)) {
+  if (/IP|whitelist|not in the whitelist/i.test(msg)) {
     return "IP 白名单拦截：请把本服务的出口 IP 加入该 API Key 的白名单。";
   }
   if (/permission|not authorized|50111|50110/i.test(msg)) {

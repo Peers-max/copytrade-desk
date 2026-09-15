@@ -63,7 +63,7 @@ export function DashboardPreview({
         <div className="flex items-center justify-between">
           <span className="text-[11px] text-muted-foreground">{btc ? `${btc.symbol} · 24h` : "行情加载中"}</span>
           <span className="text-[10px] text-muted-foreground">
-            {m.source === "binance" ? "Binance" : "不可用"}
+            {m.source === "okx" ? "OKX" : m.source === "gate" ? "Gate.io" : "不可用"}
           </span>
         </div>
         {btc ? (

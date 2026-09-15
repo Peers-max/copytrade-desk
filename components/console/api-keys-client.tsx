@@ -19,7 +19,7 @@ import { PageHeader, Panel } from "@/components/console/ui";
 import { EXCHANGE_LABEL, fmtUsd, timeAgo } from "@/lib/format";
 import type { ApiKey } from "@/lib/types";
 
-type Ex = { id: string; name: string; cn: string; tradable?: boolean };
+type Ex = { id: string; name: string; cn: string; tradable?: boolean; blockedFromWorker?: boolean };
 
 export function ApiKeysClient({
   keys: initial,
@@ -117,6 +117,9 @@ export function ApiKeysClient({
         <a href="/tutorials" className="btn-ghost self-center">
           查看绑定教程
         </a>
+        <a href="/api/diag" target="_blank" rel="noreferrer" className="btn-ghost self-center">
+          出网诊断
+        </a>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -183,19 +186,25 @@ export function ApiKeysClient({
         })}
       </div>
 
-      <Panel className="mt-5" title="支持的交易所" desc="只有已打通实盘下单的交易所才能真正用于跟单">
+      <Panel className="mt-5" title="支持的交易所" desc="「本环境不可用」= 适配器已实现，但 Cloudflare 出口被该交易所拒绝">
         <div className="flex flex-wrap gap-2">
           {exchanges.map((e) => (
             <span
               key={e.id}
               className={cn(
                 "chip px-3.5 py-2 text-[12.5px]",
-                e.tradable ? "border-wise-green/50 bg-wise-mint/40" : "opacity-70"
+                e.blockedFromWorker
+                  ? "border-[#f6465d]/30 bg-[#f6465d]/8 text-[#f6465d]"
+                  : e.tradable
+                  ? "border-wise-green/50 bg-wise-mint/40"
+                  : "opacity-70"
               )}
             >
               <img src={`/icons/${e.id}.png`} alt="" className="h-3.5 w-3.5 object-contain" />
               {e.name} · {e.cn}
-              {e.tradable ? (
+              {e.blockedFromWorker ? (
+                <span className="ml-1 font-semibold">本环境不可用</span>
+              ) : e.tradable ? (
                 <span className="ml-1 font-semibold text-wise-darkgreen">可实盘</span>
               ) : (
                 <span className="ml-1 text-muted-foreground">即将支持</span>
@@ -293,6 +302,19 @@ export function ApiKeysClient({
                       绑定后请先用小额资金试跑一次。
                     </p>
                   </div>
+
+                  {current?.blockedFromWorker ? (
+                    <div className="flex gap-3 rounded-2xl border border-[#f6465d]/40 bg-[#f6465d]/8 p-3.5">
+                      <TriangleAlert size={16} className="mt-0.5 shrink-0 text-[#f6465d]" />
+                      <p className="text-[12px] leading-relaxed text-[#f6465d]">
+                        <span className="font-semibold">当前部署环境下 {current.name} 不可用。</span>
+                        本服务跑在 Cloudflare Workers 上，实测币安会返回 403 / 451「restricted location」、
+                        Bybit 返回 403 地区封锁 —— 验签和下单都会被挡在门外。请改用
+                        <span className="font-semibold"> OKX</span>；若必须用 {current.name}，
+                        需要把执行层部署到非 Cloudflare 的主机。
+                      </p>
+                    </div>
+                  ) : null}
 
                   {error ? <p className="text-[12.5px] text-[#f6465d]">{error}</p> : null}
 

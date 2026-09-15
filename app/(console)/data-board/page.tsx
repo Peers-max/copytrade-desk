@@ -163,10 +163,12 @@ export default async function DataBoardPage() {
             ))}
           </div>
           <div className="mt-4">
-            <Badge tone={market.source === "binance" ? "green" : "warn"}>
-              {market.source === "binance"
-                ? `数据源：币安公开行情 · 更新于 ${new Date(market.ts).toLocaleTimeString("zh-CN", { hour12: false })}`
-                : "行情源不可用，请稍后刷新"}
+            <Badge tone={market.source === "unavailable" ? "warn" : "green"}>
+              {market.source === "unavailable"
+                ? "行情源不可用 —— 访问 /api/diag 查看出网探测"
+                : `数据源：${market.source === "okx" ? "OKX" : "Gate.io"} 公开行情 · 更新于 ${new Date(
+                    market.ts
+                  ).toLocaleTimeString("zh-CN", { hour12: false })}`}
             </Badge>
           </div>
         </Panel>
