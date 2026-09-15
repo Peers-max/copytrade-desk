@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Bell, CheckCheck, Megaphone, ShieldAlert, Wallet } from "lucide-react";
+import { Activity, Bell, CheckCheck, Megaphone, ShieldAlert, Wallet } from "lucide-react";
 import { Badge, cn } from "@/components/ui";
 import { PageHeader } from "@/components/console/ui";
 import { timeAgo } from "@/lib/format";
@@ -10,6 +10,7 @@ import type { Notification } from "@/lib/types";
 
 const ICONS: Record<Notification["type"], any> = {
   signal: Bell,
+  trade: Activity,
   risk: ShieldAlert,
   system: Megaphone,
   billing: Wallet,
@@ -17,6 +18,7 @@ const ICONS: Record<Notification["type"], any> = {
 
 const TONE: Record<Notification["type"], string> = {
   signal: "bg-wise-mint text-wise-darkgreen",
+  trade: "bg-wise-mint text-wise-darkgreen",
   risk: "bg-[#f6465d]/12 text-[#f6465d]",
   system: "bg-surface text-muted-foreground",
   billing: "bg-warning/15 text-[#8a6d00]",

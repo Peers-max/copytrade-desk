@@ -3,7 +3,7 @@ import { Badge, cn } from "@/components/ui";
 import { PageHeader, Panel } from "@/components/console/ui";
 import { getSessionUser } from "@/lib/auth";
 import { count, filter } from "@/lib/db";
-import { PLANS, seedIfNeeded } from "@/lib/seed";
+import { PLANS, bootstrapIfNeeded } from "@/lib/seed";
 import { fmtDate } from "@/lib/format";
 import { ProfileForm } from "@/components/console/profile-form";
 import type { ApiKey } from "@/lib/types";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "个人中心" };
 
 export default async function ProfilePage() {
-  seedIfNeeded();
+  await bootstrapIfNeeded();
   const user = (await getSessionUser())!;
   const plan = PLANS.find((p) => p.id === user.planId) ?? PLANS[0];
   const keys = await filter<ApiKey>("apiKeys", (k) => k.userId === user.id);

@@ -5,7 +5,7 @@
  *   CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=yyy node scripts/seed-kv.mjs
  *
  * 说明：
- * - 线上首次请求其实会自动播种（见 lib/auth.ts 的 seedIfNeeded），
+ * - 线上首次请求其实会自动播种（见 lib/auth.ts 的 bootstrapIfNeeded），
  *   这个脚本是为了「部署后立刻有数据、无需等待首个请求」而准备。
  * - 走 Cloudflare REST API，不依赖 wrangler，避免本地构建链路的版本问题。
  */

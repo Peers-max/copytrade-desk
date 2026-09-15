@@ -4,5 +4,5 @@ import { buildMarket } from "@/lib/market";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ ok: true, snapshot: buildMarket() });
+  return NextResponse.json({ ok: true, snapshot: await buildMarket() });
 }

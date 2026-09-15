@@ -1,13 +1,14 @@
 import { cookies } from "next/headers";
 import { find, insert, mutate, update, uid } from "./db";
-import { seedIfNeeded } from "./seed";
+import { bootstrapIfNeeded } from "./seed";
+import { safeEqual } from "./crypto";
 import type { User } from "./types";
 
 export const SESSION_COOKIE = "coince_session";
 const DEMO_CODE = "888888";
 
 export async function getSessionUser(): Promise<User | null> {
-  await seedIfNeeded();
+  await bootstrapIfNeeded();
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -15,6 +16,14 @@ export async function getSessionUser(): Promise<User | null> {
   if (!s || s.expiresAt < Date.now()) return null;
   const u = await find<User>("users", (x) => x.id === s.userId);
   return u ?? null;
+}
+
+/** 站主校验：非站主直接 403，用于信号源管理、清库等敏感接口。 */
+export async function requireAdmin(): Promise<User | null> {
+  const u = await getSessionUser();
+  if (!u) return null;
+  if (u.role === "admin" || u.id === "u_admin") return u;
+  return null;
 }
 
 export async function getUserById(id: string): Promise<User | null> {
@@ -36,11 +45,11 @@ export async function destroySession(token: string): Promise<void> {
   await update<any>("sessions", (s) => s.token === token, { expiresAt: 0 });
 }
 
-/** 生成 6 位邮箱验证码（演示环境固定为 888888，同时返回真实随机码以便演示）。 */
+/** 生成 6 位邮箱验证码。 */
 export async function issueEmailCode(email: string): Promise<{ code: string; expiresAt: number }> {
   const code = String(Math.floor(100000 + Math.random() * 900000));
   const expiresAt = Date.now() + 1000 * 60 * 10;
-  const rec = { email, code, expiresAt, demo: DEMO_CODE };
+  const rec = { email, code, expiresAt };
   await mutate<any>("emailCodes", (rows) => {
     const idx = rows.findIndex((c) => c.email === email);
     if (idx >= 0) rows[idx] = rec;
@@ -72,22 +81,10 @@ export async function ensureUser(email: string): Promise<User> {
     createdAt: now,
     avatarHue: Math.floor(Math.random() * 360),
     riskProfile: "均衡",
+    role: "user",
   };
   await insert<User>("users", u);
-  await cloneDemoData(u.id);
   return u;
-}
-
-/** 新用户复制一份演示数据，保证控制台非空。整表只落盘一次，避免边缘环境多次 KV 往返。 */
-async function cloneDemoData(userId: string): Promise<void> {
-  const { all, insertMany } = await import("./db");
-  for (const col of ["apiKeys", "copyRelations", "trades", "notifications", "invoices", "strategySubs"]) {
-    const rows = await all<any>(col);
-    const cloned = rows
-      .filter((r) => r.userId === "u_demo")
-      .map((r) => ({ ...r, id: uid(col.slice(0, 2)), userId }));
-    await insertMany<any>(col, cloned);
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -104,16 +101,6 @@ export function adminLoginEnabled(): boolean {
   return Boolean(process.env.ADMIN_USER && process.env.ADMIN_PASS);
 }
 
-/** 定长时间比较，避免通过响应时间侧信道推断密码。 */
-function safeEqual(a: string, b: string): boolean {
-  const ab = new TextEncoder().encode(a);
-  const bb = new TextEncoder().encode(b);
-  let diff = ab.length ^ bb.length;
-  const n = Math.max(ab.length, bb.length);
-  for (let i = 0; i < n; i++) diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
-  return diff === 0;
-}
-
 export function verifyAdminCredentials(username: string, password: string): boolean {
   const u = process.env.ADMIN_USER;
   const p = process.env.ADMIN_PASS;
@@ -124,14 +111,14 @@ export function verifyAdminCredentials(username: string, password: string): bool
   return okUser && okPass;
 }
 
-/** 站主账号的用户记录（不存在则创建，并复制一份演示数据让控制台非空）。 */
+/**
+ * 站主账号的用户记录。
+ * 注意：不再复制任何演示数据，也不再预置虚假余额 —— 控制台里看到的一切
+ * 都必须来自真实操作。
+ */
 export async function ensureAdminUser(username: string): Promise<User> {
-  const { all: allRows } = await import("./db");
-  const rows = await allRows<User>("users");
-  const existing =
-    rows.find((u) => u.id === "u_admin") ??
-    rows.find((u) => u.email.toLowerCase() === `${username}@admin.local`.toLowerCase());
-  if (existing) return existing;
+  const rows = await find<User>("users", (u) => u.id === "u_admin");
+  if (rows) return rows;
 
   const now = Date.now();
   const u: User = {
@@ -141,13 +128,13 @@ export async function ensureAdminUser(username: string): Promise<User> {
     verified: true,
     planId: "pro",
     planExpiresAt: now + 1000 * 60 * 60 * 24 * 365 * 5,
-    balance: 100000,
+    balance: 0,
     referralCode: "ADMIN",
     createdAt: now,
     avatarHue: 152,
     riskProfile: "激进",
+    role: "admin",
   };
   await insert<User>("users", u);
-  await cloneDemoData(u.id);
   return u;
 }

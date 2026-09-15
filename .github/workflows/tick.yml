@@ -1,0 +1,48 @@
+name: Quant Tick
+
+# 定时驱动量化引擎。
+#
+# 为什么放在 GitHub Actions 而不是 Workers Cron Trigger：
+#   OpenNext 打包出来的 worker.js 入口是自动生成的，挂自定义 scheduled handler
+#   需要在构建链路里做侵入式改造；而 Actions 本来就在用（见 deploy.yml），
+#   直接 curl 一下最省事，也不占 Cloudflare 的 CPU 额度。
+#
+# 前置：在仓库 Secrets 里配置 TICK_TOKEN 与 WORKER_URL，并确保 Worker 侧设置了
+# 同名密钥：wrangler secret put TICK_TOKEN
+
+on:
+  schedule:
+    # 每 5 分钟一次（GitHub 的 schedule 在高负载时会延迟几分钟，属正常）
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: quant-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run quant engine
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          TICK_TOKEN: ${{ secrets.TICK_TOKEN }}
+        run: |
+          if [ -z "$WORKER_URL" ] || [ -z "$TICK_TOKEN" ]; then
+            echo "未配置 WORKER_URL / TICK_TOKEN，跳过本轮。"
+            exit 0
+          fi
+          code=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+            -X POST "$WORKER_URL/api/quant/run" \
+            -H "content-type: application/json" \
+            -H "x-tick-token: $TICK_TOKEN" \
+            --max-time 120 \
+            -d '{}')
+          echo "HTTP $code"
+          cat /tmp/resp.json
+          if [ "$code" != "200" ]; then
+            echo "::warning::量化引擎返回非 200，请检查 Worker 日志"
+            exit 1
+          fi

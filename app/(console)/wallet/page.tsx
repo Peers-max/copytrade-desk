@@ -1,14 +1,14 @@
 import { WalletClient } from "@/components/console/wallet-client";
 import { getSessionUser } from "@/lib/auth";
 import { filter } from "@/lib/db";
-import { PLANS, seedIfNeeded } from "@/lib/seed";
+import { PLANS, bootstrapIfNeeded } from "@/lib/seed";
 import type { Invoice } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "钱包订阅" };
 
 export default async function WalletPage() {
-  seedIfNeeded();
+  await bootstrapIfNeeded();
   const user = (await getSessionUser())!;
   const invoices = (await filter<Invoice>("invoices", (i) => i.userId === user.id)).sort((a, b) => b.createdAt - a.createdAt);
   return (

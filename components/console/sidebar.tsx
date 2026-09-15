@@ -17,6 +17,7 @@ import {
   Menu,
   ShoppingBag,
   Store,
+  Radio,
   User as UserIcon,
   Wallet,
   X,
@@ -31,6 +32,7 @@ const GROUPS = [
     items: [
       { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
       { href: "/copy-trading", label: "跟单交易", icon: Copy },
+      { href: "/sources", label: "信号源管理", icon: Radio },
       { href: "/strategies", label: "策略市场", icon: Store },
       { href: "/my-strategy", label: "我的策略", icon: Layers },
     ],
@@ -116,6 +118,10 @@ export function ConsoleSidebar({
           <Link href="/" className="mb-5 flex items-center gap-2 px-3">
             <Logo size={26} />
             <span className="text-[16px] font-bold">币策</span>
+            <span className="ml-auto inline-flex items-center gap-1 rounded-pill bg-[#f6465d]/12 px-2 py-0.5 text-[10px] font-bold text-[#f6465d]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#f6465d]" />
+              实盘
+            </span>
           </Link>
           <div className="flex-1 overflow-y-auto pr-1 no-scrollbar">{nav}</div>
           <UserBox user={user} />

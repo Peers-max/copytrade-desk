@@ -3,7 +3,7 @@ import { AreaChart, Badge, Donut, Sparkline, cn } from "@/components/ui";
 import { PageHeader, Panel, StatCard, Td, Th } from "@/components/console/ui";
 import { getSessionUser } from "@/lib/auth";
 import { buildMarket } from "@/lib/market";
-import { getTraders, seedIfNeeded } from "@/lib/seed";
+import { getTraders, bootstrapIfNeeded } from "@/lib/seed";
 import { all, filter } from "@/lib/db";
 import { exchangeBreakdown, pnlByDay } from "@/lib/stats";
 import { fmtCompactUsd, fmtPct, fmtUsd, EXCHANGE_LABEL } from "@/lib/format";
@@ -13,8 +13,8 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "数据看板" };
 
 export default async function DataBoardPage() {
-  seedIfNeeded();
-  const market = buildMarket();
+  await bootstrapIfNeeded();
+  const market = await buildMarket();
   const traders = await getTraders();
   const user = (await getSessionUser())!;
   const trades = await filter<Trade>("trades", (t) => t.userId === user.id);
@@ -37,7 +37,7 @@ export default async function DataBoardPage() {
         <StatCard label="累计成交笔数" value={trades.length} sub={`其中已平仓 ${closed.length} 笔`} icon={ChartBar} />
         <StatCard label="胜率" value={`${winRate.toFixed(1)}%`} sub={`平均盈亏 ${fmtUsd(totalPnl / (closed.length || 1))} USDT`} icon={Flame} />
         <StatCard label="累计成交额" value={fmtCompactUsd(totalVolume)} sub="按开仓价估算" icon={ChartPie} />
-        <StatCard label="全平台信号" value={totalSignals.toLocaleString()} sub="近 24 小时持续生成" icon={Users} />
+        <StatCard label="全平台信号" value={totalSignals.toLocaleString()} sub="由量化引擎 / Webhook / 手动发布产生" icon={Users} />
       </div>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-[1.5fr_1fr]">
@@ -141,9 +141,9 @@ export default async function DataBoardPage() {
           <div className="grid grid-cols-2 gap-3">
             {[
               { k: "多空比", v: `${market.longShort.long}% / ${market.longShort.short}%` },
-              { k: "24h 清算", v: fmtCompactUsd(market.totalLiquidationUsd) },
-              { k: "资金费率", v: `${(market.fundingRate * 100).toFixed(3)}%` },
-              { k: "大额挂单", v: `${market.largeOrders.length} 笔` },
+              { k: "BTC 24h 成交额", v: fmtCompactUsd(market.tickers[0]?.volume24h ?? 0) },
+              { k: "资金费率", v: `${(market.fundingRate * 100).toFixed(4)}%` },
+              { k: "盘口大额挂单", v: `${market.largeOrders.length} 档` },
             ].map((x) => (
               <div key={x.k} className="rounded-2xl border border-border bg-surface/60 p-4">
                 <div className="text-[11.5px] text-muted-foreground">{x.k}</div>
@@ -163,7 +163,11 @@ export default async function DataBoardPage() {
             ))}
           </div>
           <div className="mt-4">
-            <Badge tone="green">数据源：8 家交易所聚合 · 15 秒刷新</Badge>
+            <Badge tone={market.source === "binance" ? "green" : "warn"}>
+              {market.source === "binance"
+                ? `数据源：币安公开行情 · 更新于 ${new Date(market.ts).toLocaleTimeString("zh-CN", { hour12: false })}`
+                : "行情源不可用，请稍后刷新"}
+            </Badge>
           </div>
         </Panel>
       </div>

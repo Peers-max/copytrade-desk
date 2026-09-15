@@ -44,6 +44,12 @@ export function SignalFeed({ initial }: { initial: Signal[] }) {
         <span className="text-[11px] text-muted-foreground">秒级同步</span>
       </div>
       <div className="space-y-2">
+        {items.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border px-3 py-8 text-center text-[12px] text-muted-foreground">
+            暂无信号。信号只会在真实触发时出现 —— 量化策略满足条件、Webhook 收到推送，
+            或站主手动发布。
+          </div>
+        ) : null}
         {items.slice(0, 6).map((s) => {
           const long = s.side === "LONG";
           return (

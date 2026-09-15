@@ -1,51 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
-import { all, insert, uid } from "@/lib/db";
-import { seedIfNeeded } from "@/lib/seed";
+import { all } from "@/lib/db";
+import { bootstrapIfNeeded } from "@/lib/seed";
 import type { Signal } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-const SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "TON/USDT"];
-const ACTIONS: Signal["action"][] = ["OPEN", "CLOSE", "ADD", "REDUCE"];
-
+/**
+ * 信号流（只读）。
+ *
+ * ⚠️ 早期版本在这里「每 8 秒概率性生成一条新信号」并且随机编造价格、
+ * 方向、杠杆 —— 那纯粹是给演示 UI 造数据用的。实盘环境下这是最危险的一类
+ * 代码：用户会以为那是一条真信号。现在它只读数据库，没有信号就返回空数组。
+ *
+ * 信号的唯一来源是 lib/executor.ts 的 emitSignal()，只有三条入口：
+ * 量化引擎、Webhook、站主手动发布。
+ */
 export async function GET(req: NextRequest) {
-  seedIfNeeded();
-  const limit = Number(req.nextUrl.searchParams.get("limit") ?? 8);
+  await bootstrapIfNeeded();
+  const limit = Math.min(Number(req.nextUrl.searchParams.get("limit") ?? 20) || 20, 100);
+  const traderId = req.nextUrl.searchParams.get("traderId");
 
-  // 每 ~8 秒概率性生成一条新信号，模拟真实信号流
-  const last = (await all<Signal>("signals")).sort((a, b) => b.ts - a.ts)[0];
-  if (!last || Date.now() - last.ts > 8000) {
-    const traders = await all<{ id: string; name: string }>("traders");
-    const t = traders[Math.floor(Math.random() * traders.length)];
-    const sym = SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
-    const price =
-      sym === "BTC/USDT"
-        ? 68000 + Math.random() * 800
-        : sym === "ETH/USDT"
-        ? 3500 + Math.random() * 60
-        : sym === "SOL/USDT"
-        ? 165 + Math.random() * 6
-        : sym === "BNB/USDT"
-        ? 588 + Math.random() * 10
-        : sym === "XRP/USDT"
-        ? 0.61 + Math.random() * 0.02
-        : 7.1 + Math.random() * 0.2;
-    await insert<Signal>("signals", {
-      id: uid("sg"),
-      ts: Date.now(),
-      traderId: t?.id ?? "tr_1",
-      traderName: t?.name ?? "TrendMaster",
-      symbol: sym,
-      side: Math.random() > 0.42 ? "LONG" : "SHORT",
-      action: ACTIONS[Math.floor(Math.random() * ACTIONS.length)],
-      price: Number(price.toFixed(price > 100 ? 1 : 4)),
-      leverage: [1, 2, 3, 5, 10][Math.floor(Math.random() * 5)],
-      status: Math.random() > 0.15 ? "filled" : "pending",
-    });
-  }
+  let signals = await all<Signal>("signals");
+  if (traderId) signals = signals.filter((s) => s.traderId === traderId);
 
-  const signals = (await all<Signal>("signals"))
-    .sort((a, b) => b.ts - a.ts)
-    .slice(0, Math.min(limit, 30));
+  signals = signals.sort((a, b) => b.ts - a.ts).slice(0, limit);
   return NextResponse.json({ ok: true, signals });
 }

@@ -110,6 +110,10 @@
     @apply inline-flex items-center gap-1.5 rounded-pill border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground;
   }
 
+  .input-base {
+    @apply w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-[14px] outline-none transition focus:border-wise-green;
+  }
+
   .num {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";

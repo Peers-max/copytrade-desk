@@ -9,6 +9,8 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "cf:seed": "node scripts/seed-kv.mjs",
+    "cf:backup": "node scripts/backup-kv.mjs",
+    "cf:purge": "node scripts/purge-kv.mjs",
     "cf:build": "opennextjs-cloudflare build",
     "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview"

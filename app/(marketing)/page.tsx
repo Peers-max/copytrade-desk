@@ -23,7 +23,9 @@ import { SignalFeed } from "@/components/home/signal-feed";
 import { DashboardPreview } from "@/components/home/dashboard-preview";
 import { buildMarket } from "@/lib/market";
 import { all } from "@/lib/db";
-import { seedIfNeeded } from "@/lib/seed";
+import { bootstrapIfNeeded, getLiveTraders } from "@/lib/seed";
+import { getSessionUser } from "@/lib/auth";
+import { portfolioOf } from "@/lib/stats";
 import type { Signal } from "@/lib/types";
 
 const EXCHANGES_ROW1 = [
@@ -154,12 +156,27 @@ const TESTIMONIALS = [
   "社区功能很棒，能看到其他人的策略分享，学习交流的好平台。",
 ];
 
+export const dynamic = "force-dynamic";
+
 export default async function HomePage() {
-  seedIfNeeded();
-  const market = buildMarket();
+  await bootstrapIfNeeded();
+  const market = await buildMarket();
   const signals = (await all<Signal>("signals"))
     .sort((a, b) => b.ts - a.ts)
     .slice(0, 6);
+
+  // 首页预览用真实数据：已登录则展示本人跟单账户，未登录则全 0（不伪造数字）
+  const user = await getSessionUser();
+  const portfolio = user ? await portfolioOf(user.id) : null;
+  const sources = await getLiveTraders();
+  const stats = {
+    equity: portfolio?.equity ?? 0,
+    totalPnl: portfolio?.totalPnl ?? 0,
+    pnlPct: portfolio?.pnlPct ?? 0,
+    runningCopies: portfolio?.runningCopies ?? 0,
+    openPositions: portfolio?.openPositions ?? 0,
+    sources: sources.length,
+  };
 
   return (
     <>
@@ -437,7 +454,7 @@ export default async function HomePage() {
               </div>
             </div>
             <div>
-              <DashboardPreview initial={market} />
+              <DashboardPreview initial={market} stats={stats} />
             </div>
           </div>
         </div>

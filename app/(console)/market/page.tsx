@@ -4,6 +4,6 @@ import { buildMarket } from "@/lib/market";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "实时行情" };
 
-export default function MarketPage() {
-  return <MarketClient initial={buildMarket()} />;
+export default async function MarketPage() {
+  return <MarketClient initial={await buildMarket()} />;
 }

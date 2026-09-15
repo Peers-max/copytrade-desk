@@ -2,10 +2,17 @@
 
 import { useEffect, useState } from "react";
 import type { MarketSnapshot } from "@/lib/market";
-import { fmtCompactUsd, fmtPct, fmtUsd } from "@/lib/format";
+import { fmtPct, fmtUsd } from "@/lib/format";
 import { Donut, Sparkline } from "@/components/ui";
 
-export function DashboardPreview({ initial }: { initial: MarketSnapshot }) {
+export function DashboardPreview({
+  initial,
+  stats,
+}: {
+  initial: MarketSnapshot;
+  /** 真实账户数据；未登录或尚无跟单时全为 0 */
+  stats: { equity: number; totalPnl: number; pnlPct: number; runningCopies: number; openPositions: number; sources: number };
+}) {
   const [m, setM] = useState<MarketSnapshot>(initial);
 
   useEffect(() => {
@@ -28,52 +35,65 @@ export function DashboardPreview({ initial }: { initial: MarketSnapshot }) {
 
   return (
     <div className="grid gap-3 sm:grid-cols-3">
-      {/* 账户总资产 */}
+      {/* 账户总资产：未登录/未跟单时显示 0，不伪造数字 */}
       <div className="rounded-3xl border border-border bg-card p-4">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-muted-foreground">账户总资产</span>
+          <span className="text-[11px] text-muted-foreground">跟单账户权益</span>
           <span className="rounded-md bg-wise-mint px-1.5 py-0.5 text-[10px] font-semibold text-wise-darkgreen">
-            LIVE
+            实盘
           </span>
         </div>
-        <div className="mt-1.5 num text-[24px] font-bold leading-none">12,380.12</div>
+        <div className="mt-1.5 num text-[24px] font-bold leading-none">{fmtUsd(stats.equity)}</div>
         <div className="mt-1 flex items-center gap-2">
           <span className="text-[10.5px] text-muted-foreground">USDT</span>
-          <span className="num text-[11px] font-semibold text-[#0ecb81]">+148.23 (+1.20%)</span>
+          <span
+            className={`num text-[11px] font-semibold ${stats.totalPnl >= 0 ? "text-[#0ecb81]" : "text-[#f6465d]"}`}
+          >
+            {stats.totalPnl >= 0 ? "+" : ""}
+            {fmtUsd(stats.totalPnl)} ({fmtPct(stats.pnlPct)})
+          </span>
         </div>
         <div className="mt-2">
           <Sparkline data={[1, 2, 1.4, 3, 2.4, 4, 3.6, 5].map((v) => v + Math.sin(v) * 0.3)} width={180} height={34} />
         </div>
       </div>
 
-      {/* 行情 */}
+      {/* 行情：真实币安行情 */}
       <div className="rounded-3xl border border-border bg-card p-4">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-muted-foreground">BTC/USDT · 1H</span>
-          <span className="text-[10px] text-muted-foreground">1H</span>
-        </div>
-        <div className="mt-1.5 flex items-baseline gap-2">
-          <span className="num text-[22px] font-bold leading-none">{fmtUsd(btc.price, 1)}</span>
-          <span className={`num text-[11px] font-semibold ${btc.changePct >= 0 ? "text-[#0ecb81]" : "text-[#f6465d]"}`}>
-            {fmtPct(btc.changePct)}
+          <span className="text-[11px] text-muted-foreground">{btc ? `${btc.symbol} · 24h` : "行情加载中"}</span>
+          <span className="text-[10px] text-muted-foreground">
+            {m.source === "binance" ? "Binance" : "不可用"}
           </span>
         </div>
-        <div className="mt-2 grid grid-cols-4 gap-1.5">
-          {m.tickers.slice(1, 5).map((t) => (
-            <div key={t.symbol} className="rounded-xl bg-surface px-2 py-1.5">
-              <div className="text-[9.5px] text-muted-foreground">{t.base}</div>
-              <div className="num text-[11.5px] font-bold">{t.price > 100 ? t.price.toFixed(1) : t.price.toFixed(3)}</div>
-              <div className={`num text-[9.5px] ${t.changePct >= 0 ? "text-[#0ecb81]" : "text-[#f6465d]"}`}>
-                {fmtPct(t.changePct, 1)}
-              </div>
+        {btc ? (
+          <>
+            <div className="mt-1.5 flex items-baseline gap-2">
+              <span className="num text-[22px] font-bold leading-none">{fmtUsd(btc.price, 1)}</span>
+              <span className={`num text-[11px] font-semibold ${btc.changePct >= 0 ? "text-[#0ecb81]" : "text-[#f6465d]"}`}>
+                {fmtPct(btc.changePct)}
+              </span>
             </div>
-          ))}
-        </div>
+            <div className="mt-2 grid grid-cols-4 gap-1.5">
+              {m.tickers.slice(1, 5).map((t) => (
+                <div key={t.symbol} className="rounded-xl bg-surface px-2 py-1.5">
+                  <div className="text-[9.5px] text-muted-foreground">{t.base}</div>
+                  <div className="num text-[11.5px] font-bold">{t.price > 100 ? t.price.toFixed(1) : t.price.toFixed(3)}</div>
+                  <div className={`num text-[9.5px] ${t.changePct >= 0 ? "text-[#0ecb81]" : "text-[#f6465d]"}`}>
+                    {fmtPct(t.changePct, 1)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="mt-3 text-[12px] text-muted-foreground">行情源暂时不可达</div>
+        )}
       </div>
 
-      {/* 市场结构 */}
+      {/* 市场结构：只保留有真实数据源的指标 */}
       <div className="rounded-3xl border border-border bg-card p-4">
-        <div className="text-[11px] text-muted-foreground">多空比</div>
+        <div className="text-[11px] text-muted-foreground">多空持仓人数比</div>
         <div className="mt-2 flex items-center gap-3">
           <div className="relative h-[74px] w-[74px]">
             <Donut
@@ -88,10 +108,10 @@ export function DashboardPreview({ initial }: { initial: MarketSnapshot }) {
             </div>
           </div>
           <div className="flex-1 space-y-1.5 text-[11px]">
-            <Row label="大额挂单" value={`${m.largeOrders.length} 笔`} />
-            <Row label="鲸鱼转账" value={`${fmtUsd(m.whaleTransfers[0]?.amount ?? 0, 1)}k BTC`} />
-            <Row label="清算热图" value={fmtCompactUsd(m.totalLiquidationUsd)} />
-            <Row label="跟单盈亏" value="+2,847" accent />
+            <Row label="盘口大额挂单" value={`${m.largeOrders.length} 档`} />
+            <Row label="资金费率" value={`${(m.fundingRate * 100).toFixed(4)}%`} />
+            <Row label="运行中信号源" value={String(stats.sources)} />
+            <Row label="跟单盈亏" value={`${stats.totalPnl >= 0 ? "+" : ""}${fmtUsd(stats.totalPnl)}`} accent={stats.totalPnl >= 0} />
           </div>
         </div>
       </div>

@@ -6,14 +6,14 @@ import {
   ensureAdminUser,
   verifyAdminCredentials,
 } from "@/lib/auth";
-import { seedIfNeeded } from "@/lib/seed";
+import { bootstrapIfNeeded } from "@/lib/seed";
 
 /**
  * 站主账号登录（用户名 + 密码）。
  * 凭据来自 Worker 密钥 ADMIN_USER / ADMIN_PASS，不随代码一起发布。
  */
 export async function POST(req: NextRequest) {
-  await seedIfNeeded();
+  await bootstrapIfNeeded();
 
   if (!adminLoginEnabled()) {
     return NextResponse.json(

@@ -13,7 +13,7 @@ import { PageHeader, Panel, StatCard, Td, Th } from "@/components/console/ui";
 import { LiveTape } from "@/components/console/live-tape";
 import { getSessionUser } from "@/lib/auth";
 import { filter } from "@/lib/db";
-import { getTraders, PLANS, seedIfNeeded } from "@/lib/seed";
+import { getTraders, PLANS, bootstrapIfNeeded } from "@/lib/seed";
 import { portfolioOf, recentTrades } from "@/lib/stats";
 import { buildMarket } from "@/lib/market";
 import { fmtPct, fmtUsd, signClass, timeAgo, EXCHANGE_LABEL } from "@/lib/format";
@@ -22,13 +22,13 @@ import type { CopyRelation } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  seedIfNeeded();
+  await bootstrapIfNeeded();
   const user = (await getSessionUser())!;
   const p = await portfolioOf(user.id);
   const relations = await filter<CopyRelation>("copyRelations", (r) => r.userId === user.id);
   const traders = await getTraders();
   const trades = await recentTrades(user.id, 7);
-  const market = buildMarket();
+  const market = await buildMarket();
   const plan = PLANS.find((x) => x.id === user.planId) ?? PLANS[0];
 
   return (
@@ -249,36 +249,48 @@ export default async function DashboardPage() {
       </div>
 
       <div className="mt-5">
-        <Panel title="推荐交易员" desc="按近 30 日收益排序" bodyClassName="p-0">
-          <div className="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
-            {traders.slice(0, 4).map((t) => (
-              <Link key={t.id} href="/copy-trading" className="bg-card p-5 transition hover:bg-surface">
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className="flex h-9 w-9 items-center justify-center rounded-full text-[11px] font-bold text-wise-darkgreen"
-                    style={{ background: `hsl(${t.avatarHue} 72% 78%)` }}
-                  >
-                    {t.name.slice(0, 2).toUpperCase()}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="truncate text-[13.5px] font-semibold">{t.name}</div>
-                    <div className="truncate text-[11px] text-muted-foreground">{t.tagline}</div>
-                  </div>
-                </div>
-                <div className="mt-3 flex items-end justify-between">
-                  <div>
-                    <div className="num text-[18px] font-bold text-[#0ecb81]">{fmtPct(t.roi30d)}</div>
-                    <div className="text-[11px] text-muted-foreground">近 30 日</div>
-                  </div>
-                  <Sparkline data={t.curve.slice(-24)} width={80} height={30} />
-                </div>
-                <div className="mt-3 flex items-center gap-2">
-                  <RiskPill risk={t.risk} />
-                  <span className="text-[11px] text-muted-foreground">{t.followers.toLocaleString()} 人跟单</span>
-                </div>
+        <Panel title="信号源" desc="跟单列表里的交易员" bodyClassName="p-0">
+          {traders.length === 0 ? (
+            <div className="px-5 py-12 text-center text-[13px] text-muted-foreground">
+              还没有信号源。
+              <Link href="/sources" className="ml-1 font-semibold text-wise-darkgreen dark:text-wise-green">
+                去创建一个
               </Link>
-            ))}
-          </div>
+              ，之后这里会显示真实的业绩数据。
+            </div>
+          ) : (
+            <div className="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
+              {traders.slice(0, 4).map((t) => (
+                <Link key={t.id} href="/copy-trading" className="bg-card p-5 transition hover:bg-surface">
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className="flex h-9 w-9 items-center justify-center rounded-full text-[11px] font-bold text-wise-darkgreen"
+                      style={{ background: `hsl(${t.avatarHue} 72% 78%)` }}
+                    >
+                      {t.name.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-[13.5px] font-semibold">{t.name}</div>
+                      <div className="truncate text-[11px] text-muted-foreground">{t.tagline}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-end justify-between">
+                    <div>
+                      <div className={cn("num text-[18px] font-bold", t.roi30d >= 0 ? "text-[#0ecb81]" : "text-[#f6465d]")}>
+                        {t.trades ? fmtPct(t.roi30d) : "—"}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">近 30 日</div>
+                    </div>
+                    {t.curve?.length ? <Sparkline data={t.curve.slice(-24)} width={80} height={30} /> : null}
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <RiskPill risk={t.risk} />
+                    <span className="text-[11px] text-muted-foreground">{t.followers ?? 0} 人跟单</span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
         </Panel>
       </div>
     </>
