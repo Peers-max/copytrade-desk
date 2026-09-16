@@ -130,6 +130,21 @@ export type Trader = {
 /* ------------------------------------------------------------------ */
 
 /**
+ * OKX 跟单品类。
+ *
+ * ⚠️ 实测（2026-09）发现的关键事实：**同一 uniqueCode 在两个品类下是两个不同的带单产品**。
+ * 全量抓取 253 个 SWAP 带单员与 159 个 SPOT 带单员，其中 **99 个 uniqueCode 重叠**，
+ * 但重叠者的 AUM、收益、品种、跟单人数**全部不同**
+ * （例：Kunpeng Plan 在 SWAP 侧 aum=40,798 / pnl=+852,646，在 SPOT 侧 aum=2,734,380 / pnl=0）。
+ *
+ * 所以本地唯一键必须是 `instType + ":" + uniqueCode`，
+ * 只按 uniqueCode 去重会让两个产品互相覆盖。
+ *
+ * 另：`MARGIN` / `FUTURES` / `OPTION` 传给 OKX 一律 400，只有这两个品类有效。
+ */
+export type OkxInstType = "SWAP" | "SPOT";
+
+/**
  * OKX 带单员快照。
  *
  * 全部来自 OKX 公开接口 /api/v5/copytrading/public-lead-traders，无需鉴权。
@@ -144,6 +159,8 @@ export type Trader = {
  */
 export type OkxLeadMeta = {
   uniqueCode: string;
+  /** 该带单产品所属品类。与 uniqueCode 共同构成唯一键，见 OkxInstType 的说明。 */
+  instType: OkxInstType;
   nickName: string;
   /** 累计收益率（小数），转百分比请 ×100 */
   pnlRatio?: string;
@@ -183,7 +200,8 @@ export type OkxLeadMeta = {
  * 字段名严格对齐 OKX `CopySettingsRequest`（first-copy-settings / amend-copy-settings 共用）：
  *
  *   uniqueCode          带单员唯一码
- *   instType            目前 OKX 只支持 'SWAP'
+ *   instType            'SWAP' 合约跟单 | 'SPOT' 现货跟单
+ *                          必须与带单员所属品类一致，否则 OKX 会拒绝
  *   copyMgnMode         'cross' 全仓 | 'isolated' 逐仓 | 'copy' 跟随带单员
  *   copyInstIdType      'copy' 跟随带单员品种 | 'custom' 指定品种
  *   copyMode            'fixed_amount' 固定金额 | 'ratio_copy' 按比例
@@ -197,7 +215,7 @@ export type OkxLeadMeta = {
  */
 export type OkxCopyParams = {
   uniqueCode: string;
-  instType: "SWAP";
+  instType: OkxInstType;
   copyMgnMode: "cross" | "isolated" | "copy";
   copyInstIdType: "custom" | "copy";
   copyMode: "fixed_amount" | "ratio_copy";

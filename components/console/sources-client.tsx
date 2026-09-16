@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Copy as CopyIcon,
@@ -12,6 +12,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Search,
   Send,
   ShieldAlert,
   Trash2,
@@ -22,7 +23,7 @@ import {
 import { Badge, cn } from "@/components/ui";
 import { PageHeader, Panel } from "@/components/console/ui";
 import { fmtUsd, timeAgo } from "@/lib/format";
-import type { Trader } from "@/lib/types";
+import type { OkxInstType, Trader } from "@/lib/types";
 
 type SourceItem = Trader & { webhookUrl?: string };
 
@@ -67,6 +68,55 @@ export function SourcesClient({
   const [runReport, setRunReport] = useState<any>(null);
   const [publishing, setPublishing] = useState<SourceItem | null>(null);
   const [okxOpen, setOkxOpen] = useState(false);
+
+  /* ---- 列表浏览状态（全量导入后会有 300+ 条，必须有搜索/筛选/分页） ---- */
+  const [q, setQ] = useState("");
+  const [srcFilter, setSrcFilter] = useState<"all" | "okx" | "quant" | "webhook" | "manual">("all");
+  const [instFilter, setInstFilter] = useState<"all" | OkxInstType>("all");
+  const [sortBy, setSortBy] = useState<"aum" | "roi" | "days" | "recent">("recent");
+  const [listPage, setListPage] = useState(1);
+  const LIST_PAGE_SIZE = 20;
+
+  const filtered = useMemo(() => {
+    const kw = q.trim().toLowerCase();
+    const list = sources.filter((s) => {
+      if (srcFilter !== "all" && s.source !== srcFilter) return false;
+      if (instFilter !== "all") {
+        if (s.source !== "okx") return false;
+        if ((s.okx?.instType ?? "SWAP") !== instFilter) return false;
+      }
+      if (kw) {
+        const hay = `${s.name} ${s.okx?.uniqueCode ?? ""} ${s.tagline ?? ""} ${(s.symbols ?? []).join(" ")}`.toLowerCase();
+        if (!hay.includes(kw)) return false;
+      }
+      return true;
+    });
+
+    return list.slice().sort((a, b) => {
+      if (sortBy === "aum") return (b.aum ?? 0) - (a.aum ?? 0);
+      if (sortBy === "roi") {
+        return Number(b.okx?.pnlRatio ?? b.roiTotal ?? 0) - Number(a.okx?.pnlRatio ?? a.roiTotal ?? 0);
+      }
+      if (sortBy === "days") return Number(b.okx?.leadDays ?? 0) - Number(a.okx?.leadDays ?? 0);
+      return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+    });
+  }, [sources, q, srcFilter, instFilter, sortBy]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+  const safePage = Math.min(listPage, totalPages);
+  const pageItems = filtered.slice((safePage - 1) * LIST_PAGE_SIZE, safePage * LIST_PAGE_SIZE);
+
+  /** OKX 各品类的本地导入数量，用于筛选器上的角标 */
+  const okxCount = useMemo(() => {
+    let swap = 0;
+    let spot = 0;
+    for (const s of sources) {
+      if (s.source !== "okx") continue;
+      if ((s.okx?.instType ?? "SWAP") === "SPOT") spot++;
+      else swap++;
+    }
+    return { swap, spot, total: swap + spot };
+  }, [sources]);
 
   const [form, setForm] = useState<{
     name: string;
@@ -217,14 +267,77 @@ export function SourcesClient({
         />
       </div>
 
-      <Panel title="信号源列表" desc={`共 ${sources.length} 个`} bodyClassName="p-0">
+      <Panel
+        title="信号源列表"
+        desc={
+          filtered.length === sources.length
+            ? `共 ${sources.length} 个`
+            : `共 ${sources.length} 个 · 筛选后 ${filtered.length} 个`
+        }
+        bodyClassName="p-0"
+      >
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3.5">
+          <div className="relative min-w-[190px] flex-1">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={q}
+              onChange={(e) => {
+                setQ(e.target.value);
+                setListPage(1);
+              }}
+              placeholder="搜索名称 / uniqueCode / 交易对"
+              className="input-base pl-9"
+            />
+          </div>
+          <select
+            value={srcFilter}
+            onChange={(e) => {
+              setSrcFilter(e.target.value as any);
+              setListPage(1);
+            }}
+            className="input-base w-[170px]"
+          >
+            <option value="all">全部来源</option>
+            <option value="okx">OKX 带单员（{okxCount.total}）</option>
+            <option value="quant">内置量化引擎</option>
+            <option value="webhook">外部 Webhook</option>
+            <option value="manual">手动发布</option>
+          </select>
+          <select
+            value={instFilter}
+            onChange={(e) => {
+              setInstFilter(e.target.value as any);
+              setListPage(1);
+            }}
+            className="input-base w-[140px]"
+          >
+            <option value="all">全部品类</option>
+            <option value="SWAP">合约（{okxCount.swap}）</option>
+            <option value="SPOT">现货（{okxCount.spot}）</option>
+          </select>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            className="input-base w-[140px]"
+          >
+            <option value="recent">按导入时间</option>
+            <option value="aum">按管理资金</option>
+            <option value="roi">按累计收益</option>
+            <option value="days">按带单天数</option>
+          </select>
+        </div>
+
         {sources.length === 0 ? (
           <div className="py-14 text-center text-[13.5px] text-muted-foreground">
             还没有信号源。先创建一个量化策略型，或建一个 Webhook 型把外部信号接进来。
           </div>
+        ) : filtered.length === 0 ? (
+          <div className="py-14 text-center text-[13.5px] text-muted-foreground">
+            没有匹配的信号源，换个关键词或放宽筛选条件。
+          </div>
         ) : (
           <div className="divide-y divide-border">
-            {sources.map((s) => (
+            {pageItems.map((s) => (
               <div key={s.id} className="px-5 py-4">
                 <div className="flex flex-wrap items-start gap-3">
                   {s.avatarUrl ? (
@@ -252,6 +365,18 @@ export function SourcesClient({
                       <span className="rounded bg-surface px-1.5 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
                         {SOURCE_LABEL[s.source] ?? s.source}
                       </span>
+                      {s.source === "okx" ? (
+                        <span
+                          className={cn(
+                            "rounded px-1.5 py-0.5 text-[10.5px] font-semibold",
+                            (s.okx?.instType ?? "SWAP") === "SPOT"
+                              ? "bg-[#e8f3ff] text-[#1b5fa8]"
+                              : "bg-wise-mint text-wise-darkgreen"
+                          )}
+                        >
+                          {(s.okx?.instType ?? "SWAP") === "SPOT" ? "现货" : "合约"}
+                        </span>
+                      ) : null}
                       {s.source === "okx" && s.okx?.hidesPositions ? (
                         <span className="inline-flex items-center gap-1 rounded bg-[#faeeda] px-1.5 py-0.5 text-[10.5px] font-semibold text-[#854f0b]">
                           <ShieldAlert size={11} /> 持仓隐藏
@@ -359,6 +484,30 @@ export function SourcesClient({
             ))}
           </div>
         )}
+
+        {filtered.length > LIST_PAGE_SIZE ? (
+          <div className="flex items-center justify-between border-t border-border px-5 py-3">
+            <span className="text-[12px] text-muted-foreground">
+              第 {safePage} / {totalPages} 页 · 每页 {LIST_PAGE_SIZE} 条
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setListPage(Math.max(1, safePage - 1))}
+                disabled={safePage <= 1}
+                className="btn-ghost"
+              >
+                上一页
+              </button>
+              <button
+                onClick={() => setListPage(Math.min(totalPages, safePage + 1))}
+                disabled={safePage >= totalPages}
+                className="btn-ghost"
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+        ) : null}
       </Panel>
 
       {runReport ? (
@@ -579,6 +728,7 @@ export function SourcesClient({
 
 type OkxRank = {
   uniqueCode: string;
+  instType: OkxInstType;
   nickName: string;
   portLink?: string;
   aum: number;
@@ -591,6 +741,23 @@ type OkxRank = {
   traderInsts: string[];
   ccy: string;
 };
+
+/**
+ * 带单产品的唯一键。
+ * ⚠️ 必须带品类 —— 99 个 uniqueCode 在合约/现货两册里重复，是不同产品。
+ * 与 lib/okx-copy.ts 的 okxKey() 必须保持一致。
+ */
+function okxKeyOf(instType: string, uniqueCode: string): string {
+  return `${instType}:${uniqueCode}`;
+}
+
+const INST_TABS: Array<[OkxInstType, string]> = [
+  ["SWAP", "合约跟单"],
+  ["SPOT", "现货跟单"],
+];
+
+/** 全集规模（2026-09 实测）：合约 253 个，现货 159 个。用于进度提示。 */
+const INST_TOTAL: Record<OkxInstType, number> = { SWAP: 253, SPOT: 159 };
 
 const LEAD_DAYS_OPTIONS: Array<[string, string]> = [
   ["", "不限带单时长"],
@@ -630,17 +797,38 @@ function OkxImportModal({ onClose, onDone }: { onClose: () => void; onDone: (msg
   const [page, setPage] = useState(1);
   const [dataVer, setDataVer] = useState<string | undefined>(undefined);
 
-  async function load(opts?: { page?: number; sortType?: string; minLeadDays?: string; minAum?: string; dataVer?: string }) {
+  /** 品类。合约与现货是两套独立的带单员名册，必须分开浏览与同步。 */
+  const [instType, setInstType] = useState<OkxInstType>("SWAP");
+
+  const [syncState, setSyncState] = useState({
+    running: false,
+    page: 0,
+    created: 0,
+    updated: 0,
+    note: "",
+  });
+  /** 用于中途停止全量同步 */
+  const abortRef = useRef(false);
+
+  async function load(opts?: {
+    page?: number;
+    sortType?: string;
+    minLeadDays?: string;
+    minAum?: string;
+    dataVer?: string;
+    instType?: OkxInstType;
+  }) {
     const p = opts?.page ?? page;
     const s = opts?.sortType ?? sortType;
     const d = opts?.minLeadDays ?? minLeadDays;
     const a = opts?.minAum ?? minAum;
     const v = opts?.dataVer ?? dataVer;
+    const it = opts?.instType ?? instType;
 
     setLoading(true);
     setErr("");
     try {
-      const qs = new URLSearchParams({ limit: "20", page: String(p), sortType: s });
+      const qs = new URLSearchParams({ limit: "20", page: String(p), sortType: s, instType: it });
       if (d) qs.set("minLeadDays", d);
       if (a) qs.set("minAum", a);
       if (v) qs.set("dataVer", v);
@@ -668,6 +856,77 @@ function OkxImportModal({ onClose, onDone }: { onClose: () => void; onDone: (msg
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** 切换品类：重置分页与 dataVer，重新拉第一页 */
+  function switchInst(next: OkxInstType) {
+    if (next === instType) return;
+    setInstType(next);
+    setPage(1);
+    setDataVer(undefined);
+    setImportSummary([]);
+    load({ instType: next, page: 1, dataVer: undefined });
+  }
+
+  /**
+   * 全量同步当前品类下的所有带单员。
+   *
+   * 服务端一次只能处理一页（20 个），所以这里循环调用直到 hasMore=false。
+   * 合约 253 个 ≈ 13 批，现货 159 个 ≈ 8 批。
+   * 第一批拿到的 dataVer 会一路带下去，避免翻页过程中 OKX 换榜导致数据漂移。
+   */
+  async function syncAll() {
+    setErr("");
+    abortRef.current = false;
+    let cur = 0;
+    let created = 0;
+    let updated = 0;
+    let dv: string | undefined;
+    setSyncState({ running: true, page: 0, created: 0, updated: 0, note: "正在建立同步…" });
+
+    try {
+      for (let pageNo = 1; pageNo <= 40; pageNo++) {
+        if (abortRef.current) {
+          setSyncState((s) => ({ ...s, running: false, note: `已中断，共处理 ${cur} 个` }));
+          await load();
+          onDone(`同步已中断：新增 ${created}，更新 ${updated}`);
+          return;
+        }
+
+        const r = await fetch("/api/okx/traders", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mode: "sync", instType, page: pageNo, sortType, dataVer: dv }),
+        });
+        const j = await r.json();
+        if (!j.ok) {
+          setErr(j.error ?? "同步失败");
+          setSyncState((s) => ({ ...s, running: false, note: "同步中止" }));
+          return;
+        }
+
+        dv = j.dataVer ?? dv;
+        created += j.created ?? 0;
+        updated += j.updated ?? 0;
+        cur += j.got ?? 0;
+        setSyncState({
+          running: true,
+          page: pageNo,
+          created,
+          updated,
+          note: `第 ${pageNo} 批：新增 ${j.created} · 更新 ${j.updated}`,
+        });
+
+        if (!j.hasMore) break;
+      }
+
+      setSyncState((s) => ({ ...s, running: false, note: `完成，共处理 ${cur} 个` }));
+      onDone(`${instType === "SPOT" ? "现货" : "合约"}带单员同步完成：新增 ${created} 个，更新 ${updated} 个`);
+      await load();
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
+      setSyncState((s) => ({ ...s, running: false, note: "同步出错" }));
+    }
+  }
+
   async function doImport(codes: string[]) {
     if (!codes.length) return;
     setBusy(codes[0]);
@@ -680,6 +939,7 @@ function OkxImportModal({ onClose, onDone }: { onClose: () => void; onDone: (msg
         // 否则在「带筛选的列表」里点导入会白白报「未找到」
         body: JSON.stringify({
           uniqueCodes: codes,
+          instType,
           sortType,
           minLeadDays: minLeadDays || undefined,
           minAum: minAum || undefined,
@@ -715,6 +975,62 @@ function OkxImportModal({ onClose, onDone }: { onClose: () => void; onDone: (msg
             <X size={18} />
           </button>
         </div>
+
+        {/* 品类切换：合约与现货在 OKX 是两套独立名册，各 253 / 159 个 */}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex gap-1.5 rounded-pill border border-border p-1">
+            {INST_TABS.map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => switchInst(k)}
+                disabled={syncState.running}
+                className={cn(
+                  "rounded-pill px-3.5 py-1.5 text-[12.5px] font-medium transition disabled:opacity-50",
+                  instType === k ? "bg-wise-green text-white" : "text-muted-foreground hover:bg-surface"
+                )}
+              >
+                {label}
+                <span className="ml-1.5 text-[11px] opacity-75">{INST_TOTAL[k]}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {syncState.running ? (
+              <button onClick={() => (abortRef.current = true)} className="btn-ghost">
+                <X size={14} /> 停止
+              </button>
+            ) : null}
+            <button onClick={syncAll} disabled={syncState.running} className="btn-primary">
+              <Download size={14} /> 全部导入（{instType === "SPOT" ? "现货" : "合约"}）
+            </button>
+          </div>
+        </div>
+
+        {syncState.running || syncState.note ? (
+          <div className="mt-3 rounded-2xl border border-border bg-surface/60 px-3.5 py-2.5 text-[11.5px]">
+            <div className="flex flex-wrap items-center gap-2">
+              {syncState.running ? <RefreshCw size={12} className="animate-spin" /> : null}
+              <span className="font-medium">{syncState.note}</span>
+              <span className="text-muted-foreground">
+                新增 {syncState.created} · 更新 {syncState.updated}
+              </span>
+            </div>
+            {syncState.running ? (
+              <div className="mt-2 h-1.5 overflow-hidden rounded-pill bg-border">
+                <div
+                  className="h-full rounded-pill bg-wise-green transition-all"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      Math.round(((syncState.created + syncState.updated) / INST_TOTAL[instType]) * 100)
+                    )}%`,
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="mt-4 flex flex-wrap items-end gap-3">
           <label className="block">
@@ -800,7 +1116,8 @@ function OkxImportModal({ onClose, onDone }: { onClose: () => void; onDone: (msg
           ) : (
             <div className="divide-y divide-border">
               {ranks.map((r) => {
-                const already = imported[r.uniqueCode];
+                const key = okxKeyOf(r.instType ?? instType, r.uniqueCode);
+                const already = imported[key];
                 const isBusy = busy === r.uniqueCode;
                 return (
                   <div key={r.uniqueCode} className="flex flex-wrap items-center gap-3 px-4 py-3">
@@ -874,7 +1191,7 @@ function OkxImportModal({ onClose, onDone }: { onClose: () => void; onDone: (msg
             <span className="self-center text-[12px] text-muted-foreground">第 {page} 页</span>
           </div>
           <div className="text-[11.5px] text-muted-foreground">
-            已导入 {Object.keys(imported).length} 个
+            本类已导入 {Object.keys(imported).filter((k) => k.startsWith(`${instType}:`)).length} / {INST_TOTAL[instType]} 个
           </div>
         </div>
 

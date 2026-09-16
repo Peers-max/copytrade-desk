@@ -5,7 +5,7 @@ import { getSource } from "@/lib/sources";
 import { PLANS } from "@/lib/seed";
 import { friendlyError, pickApiKey, tradingCredentials } from "@/lib/keys";
 import { amendCopy, fetchPublicConfig, firstCopy, getMyCopyPositions, stopCopy } from "@/lib/okx-copy";
-import type { CopyRelation, OkxCopyParams } from "@/lib/types";
+import type { CopyRelation, OkxCopyParams, OkxInstType } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +49,13 @@ export async function GET(req: NextRequest) {
       okxError = "尚未绑定可用的 OKX API Key";
     } else {
       try {
-        okxPositions = await getMyCopyPositions(cred);
+        // 跟单持仓分品类查询：SWAP 与 SPOT 是两套独立的子仓位账本，必须分别拉再合并。
+        // 单个品类失败不影响另一个（例如账户没开通现货跟单）。
+        const [swap, spot] = await Promise.all([
+          getMyCopyPositions(cred, undefined, "SWAP").catch(() => [] as any[]),
+          getMyCopyPositions(cred, undefined, "SPOT").catch(() => [] as any[]),
+        ]);
+        okxPositions = [...swap, ...spot];
       } catch (e: any) {
         okxError = friendlyError(String(e?.message ?? e));
       }
@@ -104,9 +110,12 @@ export async function POST(req: NextRequest) {
     }
 
     const copyMode: OkxCopyParams["copyMode"] = b.copyMode === "ratio_copy" ? "ratio_copy" : "fixed_amount";
+    // 品类必须跟着带单员走：SWAP 带单员只能用 SWAP 跟，SPOT 同理。
+    // 历史数据可能没有 instType 字段，兜底 SWAP（当时只导入过合约）。
+    const instType: OkxInstType = trader.okx.instType ?? "SWAP";
     const params: OkxCopyParams = {
       uniqueCode,
-      instType: "SWAP",
+      instType,
       copyMgnMode: pick(OKX_MGN_MODES, b.copyMgnMode, "copy"),
       copyInstIdType: b.copyInstIdType === "custom" ? "custom" : "copy",
       copyMode,
@@ -121,7 +130,7 @@ export async function POST(req: NextRequest) {
 
     // 用 OKX 的实时限额校验，避免明知必然失败的请求打过去
     try {
-      const lim = await fetchPublicConfig();
+      const lim = await fetchPublicConfig(instType);
       if (!params.copyTotalAmt || params.copyTotalAmt <= 0) {
         return NextResponse.json({ ok: false, error: "请填写跟单总额" }, { status: 400 });
       }
@@ -316,7 +325,7 @@ export async function DELETE(req: NextRequest) {
     );
 
     try {
-      await stopCopy(cred, rel.okx.uniqueCode, closeType);
+      await stopCopy(cred, rel.okx.uniqueCode, closeType, rel.okx.instType ?? "SWAP");
     } catch (e: any) {
       return NextResponse.json(
         { ok: false, error: `在 OKX 侧停止跟单失败：${friendlyError(String(e?.message ?? e))}` },

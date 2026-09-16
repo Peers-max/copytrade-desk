@@ -7,9 +7,9 @@ import { KeyRound, Pause, Play, Plus, Radio, Search, Settings2, Trash2, Triangle
 import { Avatar, Badge, RiskPill, Sparkline, cn } from "@/components/ui";
 import { PageHeader, Panel, Td, Th } from "@/components/console/ui";
 import { fmtPct, fmtUsd, signClass, timeAgo } from "@/lib/format";
-import type { CopyRelation, Trader } from "@/lib/types";
+import type { CopyRelation, OkxInstType, Trader } from "@/lib/types";
 
-type SortKey = "roi30d" | "winRate" | "followers" | "maxDrawdown";
+type SortKey = "roi30d" | "winRate" | "followers" | "maxDrawdown" | "roiTotal" | "aum";
 
 type KeyOption = { id: string; exchange: string; label: string; masked: string };
 
@@ -35,7 +35,11 @@ export function CopyTradingClient({
   const [tab, setTab] = useState<"market" | "mine">("market");
   const [q, setQ] = useState("");
   const [risk, setRisk] = useState<"all" | "low" | "medium" | "high">("all");
-  const [sort, setSort] = useState<SortKey>("roi30d");
+  /** 品类筛选：合约 / 现货在 OKX 是两套独立名册 */
+  const [instFilter, setInstFilter] = useState<"all" | OkxInstType>("all");
+  /** 卡片渐进渲染：全量导入后可能有 300+ 个信号源，一次性渲染会卡 */
+  const [shown, setShown] = useState(24);
+  const [sort, setSort] = useState<SortKey>("roiTotal");
   const [relations, setRelations] = useState<CopyRelation[]>(initialRelations);
   const [modal, setModal] = useState<Trader | null>(null);
   const [form, setForm] = useState<{
@@ -71,16 +75,26 @@ export function CopyTradingClient({
     slRatio: 0.1,
     subPosCloseType: "copy_close" as "copy_close" | "market_close" | "manual_close",
   });
-  const [okxLimits, setOkxLimits] = useState<any>(null);
+  /** OKX 限额按品类分开存：现货与合约的上限不一定相同 */
+  const [okxLimits, setOkxLimits] = useState<Record<string, any>>({});
 
   useEffect(() => {
-    fetch("/api/okx/config")
-      .then((r) => r.json())
-      .then((j) => {
-        if (j?.ok) setOkxLimits(j.limits);
-      })
-      .catch(() => undefined);
+    Promise.all(
+      (["SWAP", "SPOT"] as const).map((it) =>
+        fetch(`/api/okx/config?instType=${it}`)
+          .then((r) => r.json())
+          .then((j) => (j?.ok ? ([it, j.limits] as const) : null))
+          .catch(() => null)
+      )
+    ).then((rows) => {
+      const m: Record<string, any> = {};
+      for (const row of rows) if (row) m[row[0]] = row[1];
+      setOkxLimits(m);
+    });
   }, []);
+
+  const instOf = (t: Trader): OkxInstType => t.okx?.instType ?? "SWAP";
+  const limitOf = (t: Trader | null) => (t ? (okxLimits[instOf(t)] ?? null) : null);
 
   const okxKeys = apiKeys.filter((k) => k.exchange === "okx");
 
@@ -88,15 +102,25 @@ export function CopyTradingClient({
     let out = traders.filter((t) => {
       const kw = q.trim().toLowerCase();
       const matchKw =
-        !kw || t.name.toLowerCase().includes(kw) || t.tagline.includes(kw) || (t.tags ?? []).some((x) => x.includes(kw));
+        !kw ||
+        t.name.toLowerCase().includes(kw) ||
+        t.tagline.includes(kw) ||
+        (t.okx?.uniqueCode ?? "").toLowerCase().includes(kw) ||
+        (t.tags ?? []).some((x) => x.includes(kw));
       const matchRisk = risk === "all" || t.risk === risk;
-      return matchKw && matchRisk;
+      const matchInst = instFilter === "all" || (t.source === "okx" && instOf(t) === instFilter);
+      return matchKw && matchRisk && matchInst;
     });
     out = [...out].sort((a, b) => (sort === "maxDrawdown" ? (a[sort] ?? 0) - (b[sort] ?? 0) : (b[sort] ?? 0) - (a[sort] ?? 0)));
     return out;
-  }, [traders, q, risk, sort]);
+  }, [traders, q, risk, sort, instFilter]);
 
   const following = new Set(relations.map((r) => r.traderId));
+
+  // 筛选条件一变就回到第一屏，避免「筛完了却停在第 5 屏」的割裂感
+  useEffect(() => {
+    setShown(24);
+  }, [q, risk, sort, instFilter]);
 
   function flash(msg: string) {
     setToast(msg);
@@ -163,6 +187,8 @@ export function CopyTradingClient({
   }
 
   const noKey = apiKeys.length === 0;
+  /** 当前弹窗对应品类的 OKX 限额（合约/现货分开取） */
+  const modalLimits = limitOf(modal);
 
   return (
     <>
@@ -246,6 +272,28 @@ export function CopyTradingClient({
                   </button>
                 ))}
               </div>
+              <div className="flex gap-1.5">
+                {(
+                  [
+                    ["all", "全部品类"],
+                    ["SWAP", "合约"],
+                    ["SPOT", "现货"],
+                  ] as const
+                ).map(([k, label]) => (
+                  <button
+                    key={k}
+                    onClick={() => setInstFilter(k)}
+                    className={cn(
+                      "rounded-pill border px-3.5 py-2 text-[13px] font-medium transition",
+                      instFilter === k
+                        ? "border-transparent bg-foreground text-background"
+                        : "border-border bg-card text-muted-foreground"
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <div className="ml-auto flex items-center gap-2 text-[13px] text-muted-foreground">
                 排序
                 <select
@@ -253,6 +301,8 @@ export function CopyTradingClient({
                   onChange={(e) => setSort(e.target.value as SortKey)}
                   className="rounded-xl border border-border bg-card px-3 py-2 text-[13px] outline-none"
                 >
+                  <option value="roiTotal">累计收益</option>
+                  <option value="aum">管理资金 (AUM)</option>
                   <option value="roi30d">近 30 日收益</option>
                   <option value="winRate">胜率</option>
                   <option value="followers">跟单人数</option>
@@ -262,7 +312,7 @@ export function CopyTradingClient({
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {list.map((t) => {
+              {list.slice(0, shown).map((t) => {
                 const isOkx = t.source === "okx";
                 const hasStats = (t.trades ?? 0) > 0;
                 return (
@@ -275,6 +325,18 @@ export function CopyTradingClient({
                           <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
                             {SOURCE_LABEL[t.source] ?? t.source}
                           </span>
+                          {t.source === "okx" ? (
+                            <span
+                              className={cn(
+                                "rounded px-1.5 py-0.5 text-[10px] font-semibold",
+                                instOf(t) === "SPOT"
+                                  ? "bg-[#e8f3ff] text-[#1b5fa8]"
+                                  : "bg-wise-mint text-wise-darkgreen"
+                              )}
+                            >
+                              {instOf(t) === "SPOT" ? "现货" : "合约"}
+                            </span>
+                          ) : null}
                           {t.verified ? (
                             <span className="rounded bg-wise-mint px-1.5 py-0.5 text-[10px] font-bold text-wise-darkgreen">
                               运行中
@@ -377,6 +439,21 @@ export function CopyTradingClient({
                 );
               })}
             </div>
+
+            {list.length > shown ? (
+              <div className="mt-5 flex flex-col items-center gap-2">
+                <button onClick={() => setShown((n) => n + 24)} className="btn-ghost">
+                  显示更多（还有 {list.length - shown} 个）
+                </button>
+                <span className="text-[12px] text-muted-foreground">
+                  已显示 {Math.min(shown, list.length)} / {list.length} 个
+                </span>
+              </div>
+            ) : list.length > 24 ? (
+              <div className="mt-5 text-center text-[12px] text-muted-foreground">
+                已显示全部 {list.length} 个
+              </div>
+            ) : null}
           </>
         )
       ) : (
@@ -639,11 +716,13 @@ export function CopyTradingClient({
                     </select>
                   </Field>
 
-                  {okxLimits ? (
+                  {modalLimits ? (
                     <div className="rounded-2xl border border-border bg-surface/60 p-3.5 text-[12px] leading-relaxed text-muted-foreground">
-                      OKX 实时限额：单笔 {okxLimits.minCopyAmt} ~ {fmtUsd(okxLimits.maxCopyAmt, 0)} USDT ·
-                      总额上限 {fmtUsd(okxLimits.maxCopyTotalAmt, 0)} · 比例上限 {okxLimits.maxCopyRatio}% ·
-                      止损上限 {(okxLimits.maxSlRatio * 100).toFixed(0)}% · 止盈上限 {(okxLimits.maxTpRatio * 100).toFixed(0)}%
+                      OKX {modal ? (instOf(modal) === "SPOT" ? "现货" : "合约") : ""}跟单实时限额：单笔 {modalLimits.minCopyAmt} ~{" "}
+                      {fmtUsd(modalLimits.maxCopyAmt, 0)} USDT ·
+                      总额上限 {fmtUsd(modalLimits.maxCopyTotalAmt, 0)} · 比例上限 {modalLimits.maxCopyRatio}% ·
+                      止损上限 {(modalLimits.maxSlRatio * 100).toFixed(0)}% · 止盈上限{" "}
+                      {(modalLimits.maxTpRatio * 100).toFixed(0)}%
                     </div>
                   ) : null}
                 </>

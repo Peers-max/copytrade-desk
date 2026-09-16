@@ -2,7 +2,7 @@ import "server-only";
 
 import { hmacSha256Base64 } from "./crypto";
 import { timedFetch, type Credentials } from "./exchanges/base";
-import type { OkxCopyLimits, OkxCopyParams, OkxLeadMeta, Trader } from "./types";
+import type { OkxCopyLimits, OkxCopyParams, OkxInstType, OkxLeadMeta, Trader } from "./types";
 
 /**
  * OKX 官方跟单（Copy Trading）客户端。
@@ -32,7 +32,16 @@ import type { OkxCopyLimits, OkxCopyParams, OkxLeadMeta, Trader } from "./types"
  */
 
 const BASE = "https://www.okx.com";
-export const COPY_INST_TYPE = "SWAP" as const;
+
+/**
+ * 默认品类。SWAP = 合约跟单，SPOT = 现货跟单。
+ *
+ * ⚠️ 实测（2026-09）：`instType` 只接受 SWAP / SPOT，
+ * 传 MARGIN / FUTURES / OPTION 一律 400。
+ * 且**两个品类是两套独立的带单员名册**（99 个 uniqueCode 重叠但数据完全不同），
+ * 所以所有公开接口都接受显式 instType，不能想当然地写死。
+ */
+export const DEFAULT_INST_TYPE: OkxInstType = "SWAP" as const;
 
 /**
  * ⚠️ 实测踩坑（2026-09）：`public-lead-traders` 的 `limit` 上限是 **20**。
@@ -77,6 +86,8 @@ async function readOkx(res: Response, what: string): Promise<OkxResp> {
 
 export type LeadRank = {
   uniqueCode: string;
+  /** 所属品类。与 uniqueCode 共同构成唯一键 */
+  instType: OkxInstType;
   nickName: string;
   portLink?: string;
   /** 当前管理资金（USDT） */
@@ -97,6 +108,11 @@ export type LeadRank = {
   /** 带单员交易品种（instId 形式） */
   traderInsts: string[];
   ccy: string;
+  /**
+   * 该带单员是否隐藏当前持仓。
+   * 只有显式探测过才有值；名册批量同步时保持 undefined（未知）。
+   */
+  hidesPositions?: boolean;
 };
 
 export type LeadPosition = {
@@ -110,6 +126,9 @@ export type LeadPosition = {
 };
 
 export type LeadRankQuery = {
+  /** 品类，默认 SWAP */
+  instType?: OkxInstType;
+  /** 每页条数。⚠️ 上限 20（RANK_MAX_LIMIT），传再大也会被夹紧 */
   limit?: number;
   page?: number;
   sortType?: "overview" | "pnl" | "aum" | "win_ratio" | "pnl_ratio" | "current_copy_trader_pnl";
@@ -135,7 +154,7 @@ function n(v: any, fallback = 0): number {
   return Number.isFinite(x) ? x : fallback;
 }
 
-function normalizeRank(r: any): LeadRank {
+function normalizeRank(r: any, instType: OkxInstType): LeadRank {
   // pnlRatios 是从最新往最早排的，反转成时间正序，直接当曲线用
   const raw = Array.isArray(r.pnlRatios) ? r.pnlRatios : [];
   const curve = raw
@@ -145,6 +164,7 @@ function normalizeRank(r: any): LeadRank {
 
   return {
     uniqueCode: String(r.uniqueCode ?? ""),
+    instType,
     nickName: String(r.nickName ?? "未命名带单员"),
     portLink: r.portLink ? String(r.portLink) : undefined,
     aum: n(r.aum),
@@ -166,9 +186,10 @@ function normalizeRank(r: any): LeadRank {
 /** 拉取带单员排行榜。这是「交易员从哪来」的答案 —— 全部是 OKX 上的真实带单员。 */
 export async function fetchLeadRanks(
   q: LeadRankQuery = {}
-): Promise<{ dataVer?: string; ranks: LeadRank[] }> {
+): Promise<{ dataVer?: string; instType: OkxInstType; ranks: LeadRank[] }> {
+  const instType: OkxInstType = q.instType === "SPOT" ? "SPOT" : DEFAULT_INST_TYPE;
   const p = new URLSearchParams();
-  p.set("instType", COPY_INST_TYPE);
+  p.set("instType", instType);
   // 上限 20，见 RANK_MAX_LIMIT 的注释
   p.set("limit", String(Math.min(Math.max(q.limit ?? RANK_MAX_LIMIT, 1), RANK_MAX_LIMIT)));
   if (q.page) p.set("page", String(q.page));
@@ -185,7 +206,8 @@ export async function fetchLeadRanks(
   const block = json.data?.[0] ?? {};
   return {
     dataVer: block.dataVer ? String(block.dataVer) : undefined,
-    ranks: (block.ranks ?? []).map(normalizeRank).filter((r) => r.uniqueCode),
+    instType,
+    ranks: (block.ranks ?? []).map((r: any) => normalizeRank(r, instType)).filter((r: LeadRank) => r.uniqueCode),
   };
 }
 
@@ -198,11 +220,12 @@ export async function fetchLeadRanks(
  */
 export async function fetchLeadPositions(
   uniqueCode: string,
-  limit = 50
+  limit = 50,
+  instType: OkxInstType = DEFAULT_INST_TYPE
 ): Promise<{ positions: LeadPosition[]; hidesPositions: boolean }> {
   const p = new URLSearchParams();
   p.set("uniqueCode", uniqueCode);
-  p.set("instType", COPY_INST_TYPE);
+  p.set("instType", instType);
   p.set("limit", String(Math.min(Math.max(limit, 1), SUBPOS_MAX_LIMIT)));
 
   const res = await timedFetch(
@@ -228,9 +251,11 @@ export async function fetchLeadPositions(
 }
 
 /** 平台跟单限额。前端在提交跟单前应据此校验，避免必然失败的请求打到 OKX。 */
-export async function fetchPublicConfig(): Promise<OkxCopyLimits> {
+export async function fetchPublicConfig(
+  instType: OkxInstType = DEFAULT_INST_TYPE
+): Promise<OkxCopyLimits> {
   const res = await timedFetch(
-    `${BASE}/api/v5/copytrading/public-config?instType=${COPY_INST_TYPE}`
+    `${BASE}/api/v5/copytrading/public-config?instType=${instType}`
   );
   const json = await readOkx(res, "读取平台跟单限额");
   const d = json.data?.[0] ?? {};
@@ -313,18 +338,23 @@ export async function amendCopy(c: Credentials, p: OkxCopyParams): Promise<void>
 export async function stopCopy(
   c: Credentials,
   uniqueCode: string,
-  subPosCloseType: OkxCopyParams["subPosCloseType"]
+  subPosCloseType: OkxCopyParams["subPosCloseType"],
+  instType: OkxInstType = DEFAULT_INST_TYPE
 ): Promise<void> {
   await signed("/api/v5/copytrading/stop-copy-trading", c, "POST", {
-    instType: COPY_INST_TYPE,
+    instType,
     uniqueCode,
     subPosCloseType,
   });
 }
 
 /** 查询对某个带单员的跟单设置。 */
-export async function getCopySettings(c: Credentials, uniqueCode: string): Promise<any[]> {
-  const p = new URLSearchParams({ instType: COPY_INST_TYPE, uniqueCode });
+export async function getCopySettings(
+  c: Credentials,
+  uniqueCode: string,
+  instType: OkxInstType = DEFAULT_INST_TYPE
+): Promise<any[]> {
+  const p = new URLSearchParams({ instType, uniqueCode });
   return signed(`/api/v5/copytrading/copy-settings?${p}`, c, "GET");
 }
 
@@ -332,9 +362,13 @@ export async function getCopySettings(c: Credentials, uniqueCode: string): Promi
  * 自己在 OKX 上的跟单持仓。
  * 用 subPosType=copy 只看跟单产生的子仓位（lead 是自己带单产生的，与跟单无关）。
  */
-export async function getMyCopyPositions(c: Credentials, limit = SUBPOS_MAX_LIMIT): Promise<any[]> {
+export async function getMyCopyPositions(
+  c: Credentials,
+  limit = SUBPOS_MAX_LIMIT,
+  instType: OkxInstType = DEFAULT_INST_TYPE
+): Promise<any[]> {
   const p = new URLSearchParams({
-    instType: COPY_INST_TYPE,
+    instType,
     subPosType: "copy",
     limit: String(Math.min(Math.max(limit, 1), SUBPOS_MAX_LIMIT)),
   });
@@ -342,8 +376,11 @@ export async function getMyCopyPositions(c: Credentials, limit = SUBPOS_MAX_LIMI
 }
 
 /** 自己正在跟的带单员列表。 */
-export async function getMyLeadTraders(c: Credentials): Promise<any[]> {
-  const p = new URLSearchParams({ instType: COPY_INST_TYPE });
+export async function getMyLeadTraders(
+  c: Credentials,
+  instType: OkxInstType = DEFAULT_INST_TYPE
+): Promise<any[]> {
+  const p = new URLSearchParams({ instType });
   return signed(`/api/v5/copytrading/current-lead-traders?${p}`, c, "GET");
 }
 
@@ -352,10 +389,11 @@ export async function closeSubposition(
   c: Credentials,
   subPosId: string,
   ordType: "market" | "limit" = "market",
-  px?: string
+  px?: string,
+  instType: OkxInstType = DEFAULT_INST_TYPE
 ): Promise<any[]> {
   const body: Record<string, string> = {
-    instType: COPY_INST_TYPE,
+    instType,
     subPosType: "copy",
     subPosId,
     ordType,
@@ -373,10 +411,11 @@ export async function placeAlgoOrder(
     slTriggerPx?: string;
     tpTriggerPxType?: "last" | "index" | "mark";
     slTriggerPxType?: "last" | "index" | "mark";
+    instType?: OkxInstType;
   }
 ): Promise<any[]> {
   const body: Record<string, string> = {
-    instType: COPY_INST_TYPE,
+    instType: args.instType ?? DEFAULT_INST_TYPE,
     subPosType: "copy",
     subPosId: args.subPosId,
   };
@@ -415,6 +454,7 @@ export function rankToTrader(rank: LeadRank, existing?: Trader | null): Trader {
 
   const meta: OkxLeadMeta = {
     uniqueCode: rank.uniqueCode,
+    instType: rank.instType,
     nickName: rank.nickName,
     pnlRatio: String(rank.roiRatio),
     pnl: String(rank.pnl),
@@ -426,14 +466,15 @@ export function rankToTrader(rank: LeadRank, existing?: Trader | null): Trader {
     portLink: rank.portLink,
     traderInsts: rank.traderInsts,
     curve: rank.curve,
-    hidesPositions: existing?.okx?.hidesPositions,
+    // 已知的本地探测结果优先；否则用这次 rank 上带的（按 code 单个导入时会探测）
+    hidesPositions: existing?.okx?.hidesPositions ?? rank.hidesPositions,
     syncedAt: Date.now(),
   };
 
   const base: Trader = {
     id: existing?.id ?? "",
     name: rank.nickName,
-    tagline: `OKX 带单员 · 带单 ${rank.leadDays} 天 · ${rank.copyTraderNum} 人跟单`,
+    tagline: `OKX ${instLabel(rank.instType)}带单员 · 带单 ${rank.leadDays} 天 · ${rank.copyTraderNum} 人跟单`,
     avatarHue: existing?.avatarHue ?? hashHue(rank.uniqueCode),
     avatarUrl: rank.portLink,
 
@@ -449,16 +490,18 @@ export function rankToTrader(rank: LeadRank, existing?: Trader | null): Trader {
     trades: 0,
     avgHold: "—",
     verified: true,
-    curve: rank.curve.map((x) => x * 100),
-    tags: ["OKX 官方", "带单员", rank.ccy],
+    // 曲线只用于画 sparkline，保留 2 位小数即可。
+    // 不做这一步的话，JS 浮点全精度（0.11030000000000001）会让 300+ 条记录的 SSR 体积膨胀约 3 倍。
+    curve: rank.curve.map((x) => Math.round(x * 100 * 100) / 100),
+    tags: ["OKX 官方", `${instLabel(rank.instType)}带单`, rank.ccy],
 
     source: "okx",
     status: existing?.status ?? "live",
     risk: riskOf(rank),
-    style: "OKX 带单员",
+    style: `OKX ${instLabel(rank.instType)}带单员`,
     symbols: symbols.length ? symbols : ["BTC/USDT"],
     okx: meta,
-    note: existing?.note ?? `导入自 OKX 跟单平台，uniqueCode=${rank.uniqueCode}`,
+    note: existing?.note ?? `导入自 OKX 跟单平台，uniqueCode=${rank.uniqueCode}（${rank.instType}）`,
     createdBy: existing?.createdBy,
     createdAt: existing?.createdAt ?? Date.now(),
     signalCount: existing?.signalCount ?? 0,
@@ -466,6 +509,21 @@ export function rankToTrader(rank: LeadRank, existing?: Trader | null): Trader {
   };
 
   return base;
+}
+
+/** 品类的中文标签，用于列表展示。 */
+export function instLabel(t: OkxInstType): string {
+  return t === "SPOT" ? "现货" : "合约";
+}
+
+/**
+ * 带单产品的本地唯一键。
+ *
+ * ⚠️ 必须带品类 —— 实测 99 个 uniqueCode 在 SWAP/SPOT 两册里重复出现，
+ * 只按 uniqueCode 匹配会让两个产品互相覆盖。
+ */
+export function okxKey(t: { uniqueCode?: string; instType?: OkxInstType }): string {
+  return `${t.instType ?? DEFAULT_INST_TYPE}:${t.uniqueCode ?? ""}`;
 }
 
 /** 用 AUM 与带单天数粗分风险档，仅用于列表标签展示，不参与任何执行逻辑。 */
