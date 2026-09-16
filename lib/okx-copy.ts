@@ -34,7 +34,42 @@ import type { OkxCopyLimits, OkxCopyParams, OkxLeadMeta, Trader } from "./types"
 const BASE = "https://www.okx.com";
 export const COPY_INST_TYPE = "SWAP" as const;
 
+/**
+ * ⚠️ 实测踩坑（2026-09）：`public-lead-traders` 的 `limit` 上限是 **20**。
+ * 传 21 就直接 400 Bad Request —— 跟 OKX 其它接口惯用的 100 完全不同。
+ * 曾经把这里写成 100，导致「从 OKX 导入带单员」整条链路 502（空响应、无堆栈，极难排查）。
+ * 夹紧放在客户端内部做，调用方随便传都不会把无效值发给 OKX。
+ */
+export const RANK_MAX_LIMIT = 20;
+
+/** `public-current-subpositions` 允许到 100，与排行榜不同，别搞混。 */
+export const SUBPOS_MAX_LIMIT = 100;
+
 type OkxResp = { code: string; msg?: string; data?: any[] };
+
+/**
+ * OKX 报错时把 HTTP 状态码与响应正文片段一起带出来。
+ * 只写「HTTP 400」等于没写 —— 排查时会误以为是权限问题而不是参数问题。
+ */
+function okxError(what: string, status: number, body: string): Error {
+  const snip = String(body ?? "").replace(/\s+/g, " ").trim().slice(0, 240);
+  return new Error(`${what}失败：OKX HTTP ${status}${snip ? ` · ${snip}` : ""}`);
+}
+
+/** 统一解析 OKX 响应：非 JSON（例如 Cloudflare/网关的 HTML 错误页）也要能给出可读信息。 */
+async function readOkx(res: Response, what: string): Promise<OkxResp> {
+  const text = await res.text().catch(() => "");
+  let json: OkxResp | null = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = null;
+  }
+  if (!json || json.code !== "0") {
+    throw okxError(what, res.status, text);
+  }
+  return json;
+}
 
 /* ================================================================== */
 /* 公开接口                                                            */
@@ -134,7 +169,8 @@ export async function fetchLeadRanks(
 ): Promise<{ dataVer?: string; ranks: LeadRank[] }> {
   const p = new URLSearchParams();
   p.set("instType", COPY_INST_TYPE);
-  p.set("limit", String(Math.min(Math.max(q.limit ?? 20, 1), 100)));
+  // 上限 20，见 RANK_MAX_LIMIT 的注释
+  p.set("limit", String(Math.min(Math.max(q.limit ?? RANK_MAX_LIMIT, 1), RANK_MAX_LIMIT)));
   if (q.page) p.set("page", String(q.page));
   if (q.sortType && RANK_SORT.has(q.sortType)) p.set("sortType", q.sortType);
   if (q.state) p.set("state", q.state);
@@ -144,10 +180,7 @@ export async function fetchLeadRanks(
   if (q.dataVer) p.set("dataVer", q.dataVer);
 
   const res = await timedFetch(`${BASE}/api/v5/copytrading/public-lead-traders?${p}`);
-  const json: OkxResp = await res.json().catch(() => ({ code: String(res.status) }));
-  if (json.code !== "0") {
-    throw new Error(`OKX ${json.code}: ${json.msg ?? `HTTP ${res.status}`}`);
-  }
+  const json = await readOkx(res, "拉取带单员排行榜");
 
   const block = json.data?.[0] ?? {};
   return {
@@ -170,16 +203,14 @@ export async function fetchLeadPositions(
   const p = new URLSearchParams();
   p.set("uniqueCode", uniqueCode);
   p.set("instType", COPY_INST_TYPE);
-  p.set("limit", String(Math.min(Math.max(limit, 1), 100)));
+  p.set("limit", String(Math.min(Math.max(limit, 1), SUBPOS_MAX_LIMIT)));
 
   const res = await timedFetch(
     `${BASE}/api/v5/copytrading/public-current-subpositions?${p}`
   );
-  const json: OkxResp = await res.json().catch(() => ({ code: String(res.status) }));
-  if (json.code !== "0") {
-    // 常见：60004 Trader doesn't exist —— 排行里拿到的 code 不一定能用于持仓查询
-    throw new Error(json.msg || `OKX ${json.code}`);
-  }
+  // 常见错误：60004 Trader doesn't exist —— 排行里拿到的 code 不一定能用于持仓查询，
+  // 所以调用方必须容错跳过（导入时不因此失败）
+  const json = await readOkx(res, "查询带单员持仓");
 
   const rows = json.data ?? [];
   const positions: LeadPosition[] = rows.map((r: any) => ({
@@ -201,8 +232,7 @@ export async function fetchPublicConfig(): Promise<OkxCopyLimits> {
   const res = await timedFetch(
     `${BASE}/api/v5/copytrading/public-config?instType=${COPY_INST_TYPE}`
   );
-  const json: OkxResp = await res.json().catch(() => ({ code: String(res.status) }));
-  if (json.code !== "0") throw new Error(json.msg || `OKX ${json.code}`);
+  const json = await readOkx(res, "读取平台跟单限额");
   const d = json.data?.[0] ?? {};
   return {
     minCopyAmt: n(d.minCopyAmt, 10),
@@ -241,10 +271,8 @@ async function signed(
     body: method === "POST" ? bodyStr : undefined,
   });
 
-  const json: OkxResp = await res.json().catch(() => ({ code: String(res.status) }));
-  if (json.code !== "0") {
-    throw new Error(`OKX ${json.code}: ${json.msg || `HTTP ${res.status}`}`);
-  }
+  // 502 / 50113 Invalid Passphrase 这类错误必须把正文带出来，否则只能靠猜
+  const json = await readOkx(res, `调用 OKX 跟单接口 ${path}`);
   return json.data ?? [];
 }
 
@@ -304,11 +332,11 @@ export async function getCopySettings(c: Credentials, uniqueCode: string): Promi
  * 自己在 OKX 上的跟单持仓。
  * 用 subPosType=copy 只看跟单产生的子仓位（lead 是自己带单产生的，与跟单无关）。
  */
-export async function getMyCopyPositions(c: Credentials, limit = 100): Promise<any[]> {
+export async function getMyCopyPositions(c: Credentials, limit = SUBPOS_MAX_LIMIT): Promise<any[]> {
   const p = new URLSearchParams({
     instType: COPY_INST_TYPE,
     subPosType: "copy",
-    limit: String(Math.min(Math.max(limit, 1), 100)),
+    limit: String(Math.min(Math.max(limit, 1), SUBPOS_MAX_LIMIT)),
   });
   return signed(`/api/v5/copytrading/current-subpositions?${p}`, c, "GET");
 }

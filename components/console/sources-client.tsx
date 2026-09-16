@@ -676,7 +676,14 @@ function OkxImportModal({ onClose, onDone }: { onClose: () => void; onDone: (msg
       const r = await fetch("/api/okx/traders", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ uniqueCodes: codes }),
+        // 把当前列表的筛选条件一起带上 —— 服务端要用同一份名单反查 uniqueCode，
+        // 否则在「带筛选的列表」里点导入会白白报「未找到」
+        body: JSON.stringify({
+          uniqueCodes: codes,
+          sortType,
+          minLeadDays: minLeadDays || undefined,
+          minAum: minAum || undefined,
+        }),
       });
       const j = await r.json();
       if (!j.ok) {
