@@ -256,8 +256,18 @@ export function RiskPill({ risk }: { risk: "low" | "medium" | "high" }) {
   return <Badge tone={m.tone}>{m.text}</Badge>;
 }
 
-export function Avatar({ name, hue }: { name: string; hue: number }) {
+export function Avatar({ name, hue, src }: { name: string; hue: number; src?: string }) {
   const initials = name.slice(0, 2).toUpperCase();
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        loading="lazy"
+        className="h-9 w-9 shrink-0 rounded-full object-cover"
+      />
+    );
+  }
   return (
     <div
       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-wise-darkgreen"

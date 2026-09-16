@@ -21,6 +21,16 @@ export async function POST(req: NextRequest) {
   if (trader.status !== "live") {
     return NextResponse.json({ ok: false, error: "该信号源已暂停，请先启用" }, { status: 409 });
   }
+  // OKX 带单员的跟单由 OKX 原生引擎负责，本站再发一次信号会导致重复开仓
+  if (trader.source === "okx") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `「${trader.name}」是 OKX 带单员，跟单由 OKX 原生引擎实时同步，不需要也不允许手动发信号。请到「跟单交易」页建立跟单关系。`,
+      },
+      { status: 400 }
+    );
+  }
 
   const side = String(b.side ?? "").toUpperCase() === "SHORT" ? "SHORT" : "LONG";
   const action = ["OPEN", "CLOSE", "ADD", "REDUCE"].includes(String(b.action ?? "").toUpperCase())

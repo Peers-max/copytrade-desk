@@ -65,8 +65,8 @@ export type ApiKey = {
 /* 信号源（跟单列表里的「交易员」）                                     */
 /* ------------------------------------------------------------------ */
 
-/** 信号来源：内置量化引擎 / 外部 Webhook / 后台手动发布 */
-export type SignalSource = "quant" | "webhook" | "manual";
+/** 信号来源：内置量化引擎 / 外部 Webhook / 后台手动发布 / OKX 官方带单员 */
+export type SignalSource = "quant" | "webhook" | "manual" | "okx";
 
 /** 内置量化策略类型 */
 export type QuantKind = "ema_cross" | "rsi_revert" | "breakout" | "grid";
@@ -83,6 +83,8 @@ export type Trader = {
   name: string;
   tagline: string;
   avatarHue: number;
+  /** 真实头像 URL（OKX 带单员会有 portLink） */
+  avatarUrl?: string;
 
   /* ---- 统计（由真实记录统计得出，未产生信号时为 0） ---- */
   roi30d: number;
@@ -110,6 +112,8 @@ export type Trader = {
   /** webhook 类信号源的接入令牌 */
   webhookToken?: string;
   quant?: QuantConfig;
+  /** OKX 带单员快照（source === "okx" 时存在） */
+  okx?: OkxLeadMeta;
   /** 一句话说明这个信号源的真实出处，例如「镜像自 X 带单员，人工录入」 */
   note?: string;
   createdBy?: string;
@@ -119,6 +123,101 @@ export type Trader = {
   signalCount?: number;
   /** 量化引擎的上一轮判定状态，用于避免重复触发（如上次 EMA 快慢线关系） */
   engineState?: Record<string, any>;
+};
+
+/* ------------------------------------------------------------------ */
+/* OKX 官方跟单                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * OKX 带单员快照。
+ *
+ * 全部来自 OKX 公开接口 /api/v5/copytrading/public-lead-traders，无需鉴权。
+ *
+ * ⚠️ 单位口径（实测确认，不是猜测）：
+ *   - `pnlRatio` 是**累计收益率的小数表示**：0.4994 → +49.94%，8.9711 → +897.11%。
+ *     历史曲线 `pnlRatios[].pnlRatio` 同一单位，起点接近 0 且可为负。
+ *   - `winRatio` 同样是小数：0.6429 → 64.29%。
+ *   - `leadDays` 是整数天数。
+ *   - 注意 OKX 的 pnlRatio **不等于** pnl / aum（实测 RuiJie: pnl/aum=46.4 而 pnlRatio=0.29），
+ *     不要试图自己换算，直接用接口给的值。
+ */
+export type OkxLeadMeta = {
+  uniqueCode: string;
+  nickName: string;
+  /** 累计收益率（小数），转百分比请 ×100 */
+  pnlRatio?: string;
+  /** 累计盈亏（USDT） */
+  pnl?: string;
+  /** 当前管理资金（USDT） */
+  aum?: string;
+  /** 胜率（小数），转百分比请 ×100 */
+  winRatio?: string;
+  /** 带单天数 */
+  leadDays?: string;
+  /** 当前跟单人数 */
+  copyTraderNum?: string;
+  /** 累计跟单人数 */
+  accCopyTraderNum?: string;
+  /** 可跟单人数上限 */
+  maxCopyTraderNum?: string;
+  /** 头像 URL */
+  portLink?: string;
+  /** 带单员的交易品种（instId 形式，如 BTC-USDT-SWAP） */
+  traderInsts?: string[];
+  /** 收益率历史曲线（小数数组），已按时间正序整理 */
+  curve?: number[];
+  /**
+   * 该带单员是否隐藏了当前持仓。
+   * 隐藏时 public-current-subpositions 返回的 instId 为空字符串 ——
+   * 此时**无法自建镜像**，只能走 OKX 原生跟单。
+   */
+  hidesPositions?: boolean;
+  /** 本地最近一次同步时间 */
+  syncedAt: number;
+};
+
+/**
+ * OKX 原生跟单参数。
+ *
+ * 字段名严格对齐 OKX `CopySettingsRequest`（first-copy-settings / amend-copy-settings 共用）：
+ *
+ *   uniqueCode          带单员唯一码
+ *   instType            目前 OKX 只支持 'SWAP'
+ *   copyMgnMode         'cross' 全仓 | 'isolated' 逐仓 | 'copy' 跟随带单员
+ *   copyInstIdType      'copy' 跟随带单员品种 | 'custom' 指定品种
+ *   copyMode            'fixed_amount' 固定金额 | 'ratio_copy' 按比例
+ *                          ⚠️ 是 ratio_copy，不是 ratio
+ *   copyTotalAmt        跟单总额（必填）
+ *   copyAmt             copyMode=fixed_amount 时的单笔金额
+ *   copyRatio           copyMode=ratio_copy 时的比例
+ *   tpRatio / slRatio   止盈 / 止损比例
+ *   subPosCloseType     停止跟单时的平仓方式
+ *                          'market_close' 市价平 | 'copy_close' 跟随带单员平 | 'manual_close' 手动平
+ */
+export type OkxCopyParams = {
+  uniqueCode: string;
+  instType: "SWAP";
+  copyMgnMode: "cross" | "isolated" | "copy";
+  copyInstIdType: "custom" | "copy";
+  copyMode: "fixed_amount" | "ratio_copy";
+  copyTotalAmt: number;
+  copyAmt?: number;
+  copyRatio?: number;
+  tpRatio?: number;
+  slRatio?: number;
+  subPosCloseType: "market_close" | "copy_close" | "manual_close";
+  startedAt: number;
+};
+
+/** OKX 跟单平台限额（来自 public-config，用于前端校验） */
+export type OkxCopyLimits = {
+  minCopyAmt: number;
+  maxCopyAmt: number;
+  maxCopyRatio: number;
+  maxCopyTotalAmt: number;
+  maxSlRatio: number;
+  maxTpRatio: number;
 };
 
 export type Strategy = {
@@ -163,6 +262,18 @@ export type CopyRelation = {
   failedTrades?: number;
   lastError?: string;
   lastSyncAt?: number;
+
+  /**
+   * 执行引擎：
+   *   "local"（默认）= 本站自建链路 —— 收到信号后用自己的适配器在交易所下单
+   *   "okx"          = OKX 原生跟单 —— 由 OKX 引擎实时同步带单员的开平仓
+   *
+   * 两者互不影响：本地信号源（quant/webhook/manual）走 local，
+   * OKX 带单员走 okx。okx 模式下 capital/leverage 等本地字段不参与执行。
+   */
+  engine?: "local" | "okx";
+  /** OKX 原生跟单参数（engine === "okx" 时必填，用于 amend / stop） */
+  okx?: OkxCopyParams;
 };
 
 export type Signal = {

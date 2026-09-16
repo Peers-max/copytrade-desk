@@ -103,7 +103,7 @@ export async function bindApiKey(userId: string, input: BindInput): Promise<Bind
 }
 
 /** 把交易所返回的英文错误翻译成用户能照做的中文提示。 */
-function friendlyError(msg: string): string {
+export function friendlyError(msg: string): string {
   // 出网被拒：这是本部署环境（Cloudflare Workers）最常见的失败，
   // 实测币安返回 403/451、Bybit 返回 403 —— 报文里往往只有一句 "fetch failed"，
   // 不翻译的话用户根本不知道发生了什么。

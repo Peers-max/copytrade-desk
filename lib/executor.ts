@@ -50,6 +50,15 @@ export type EmitReport = {
 };
 
 export async function emitSignal(input: EmitInput): Promise<EmitReport> {
+  // ⚠️ OKX 带单员走的是 OKX 原生跟单，开平仓由 OKX 引擎同步。
+  // 如果这类信号源的话又走一遍本地下单链路，同一笔判断会在用户账户里开两次仓。
+  // 这里直接拒绝，不让它进入任何后续流程。
+  if (input.trader.source === "okx") {
+    throw new Error(
+      `「${input.trader.name}」是 OKX 带单员，其跟单由 OKX 原生引擎执行，不能通过本站信号链路下发。`
+    );
+  }
+
   const price = input.price && input.price > 0 ? input.price : await lastPrice(input.symbol);
   if (!price) throw new Error(`无法获取 ${input.symbol} 的最新价，信号未发出`);
 
@@ -74,7 +83,7 @@ export async function emitSignal(input: EmitInput): Promise<EmitReport> {
 
   let relations = await filter<CopyRelation>(
     "copyRelations",
-    (r) => r.traderId === input.trader.id && r.status === "running"
+    (r) => r.traderId === input.trader.id && r.status === "running" && r.engine !== "okx"
   );
   if (input.onlyUserId) relations = relations.filter((r) => r.userId === input.onlyUserId);
 

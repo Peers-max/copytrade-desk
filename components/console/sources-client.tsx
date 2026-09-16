@@ -2,16 +2,18 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Activity,
   Copy as CopyIcon,
+  Download,
   Link2,
   Pause,
   Play,
   Plus,
   RefreshCw,
   Send,
+  ShieldAlert,
   Trash2,
   Webhook,
   X,
@@ -30,6 +32,20 @@ const KIND_LABEL: Record<string, string> = {
   breakout: "区间突破",
   grid: "网格",
 };
+
+const SOURCE_LABEL: Record<string, string> = {
+  okx: "OKX 带单员",
+  quant: "量化引擎",
+  webhook: "Webhook",
+  manual: "手动发布",
+};
+
+/** OKX 的收益率/胜率都是小数，×100 才是百分比 */
+function pct(v: any, digits = 1): string {
+  const x = Number(v);
+  if (!Number.isFinite(x)) return "—";
+  return `${x >= 0 ? "+" : ""}${(x * 100).toFixed(digits)}%`;
+}
 
 const INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"];
 
@@ -50,6 +66,7 @@ export function SourcesClient({
   const [error, setError] = useState("");
   const [runReport, setRunReport] = useState<any>(null);
   const [publishing, setPublishing] = useState<SourceItem | null>(null);
+  const [okxOpen, setOkxOpen] = useState(false);
 
   const [form, setForm] = useState<{
     name: string;
@@ -161,9 +178,12 @@ export function SourcesClient({
     <>
       <PageHeader
         title="信号源管理"
-        desc="跟单列表里的「交易员」，本质就是一个信号源。三种接入方式：内置量化引擎、外部 Webhook、手动发布。"
+        desc="跟单列表里的「交易员」，本质就是一个信号源。可接入 OKX 官方带单员、内置量化引擎、外部 Webhook，或由站主手动发布。"
         actions={
           <>
+            <button onClick={() => setOkxOpen(true)} className="btn-ghost">
+              <Download size={15} /> 从 OKX 导入带单员
+            </button>
             <button onClick={() => runQuant()} disabled={busy} className="btn-ghost">
               <Zap size={15} /> 立即运行一轮
             </button>
@@ -174,7 +194,12 @@ export function SourcesClient({
         }
       />
 
-      <div className="mb-5 grid gap-4 md:grid-cols-3">
+      <div className="mb-5 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <HowCard
+          icon={Download}
+          title="OKX 官方带单员"
+          desc="从 OKX 跟单平台拉真实带单员名册：AUM、跟单人数、收益曲线、胜率全部是 OKX 的真实数据。跟单走 OKX 原生引擎，实时同步开平仓。"
+        />
         <HowCard
           icon={Activity}
           title="内置量化引擎"
@@ -202,12 +227,21 @@ export function SourcesClient({
             {sources.map((s) => (
               <div key={s.id} className="px-5 py-4">
                 <div className="flex flex-wrap items-start gap-3">
-                  <div
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-[12px] font-bold text-wise-darkgreen"
-                    style={{ background: `hsl(${s.avatarHue} 72% 78%)` }}
-                  >
-                    {s.name.slice(0, 2).toUpperCase()}
-                  </div>
+                  {s.avatarUrl ? (
+                    <img
+                      src={s.avatarUrl}
+                      alt={s.name}
+                      className="h-10 w-10 shrink-0 rounded-2xl object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-[12px] font-bold text-wise-darkgreen"
+                      style={{ background: `hsl(${s.avatarHue} 72% 78%)` }}
+                    >
+                      {s.name.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
 
                   <div className="min-w-[180px] flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -216,22 +250,48 @@ export function SourcesClient({
                         {s.status === "live" ? "运行中" : "已暂停"}
                       </Badge>
                       <span className="rounded bg-surface px-1.5 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
-                        {s.source === "quant" ? "量化引擎" : s.source === "webhook" ? "Webhook" : "手动发布"}
+                        {SOURCE_LABEL[s.source] ?? s.source}
                       </span>
+                      {s.source === "okx" && s.okx?.hidesPositions ? (
+                        <span className="inline-flex items-center gap-1 rounded bg-[#faeeda] px-1.5 py-0.5 text-[10.5px] font-semibold text-[#854f0b]">
+                          <ShieldAlert size={11} /> 持仓隐藏
+                        </span>
+                      ) : null}
                     </div>
                     <div className="mt-0.5 text-[12px] text-muted-foreground">{s.tagline}</div>
                     <div className="mt-1 text-[11.5px] text-muted-foreground">
                       覆盖 {(s.symbols ?? []).join(" · ") || "—"}
                       {s.quant ? ` · ${KIND_LABEL[s.quant.kind] ?? s.quant.kind} · ${s.quant.interval}` : ""}
-                      {s.lastSignalAt ? ` · 最近信号 ${timeAgo(s.lastSignalAt)}` : " · 尚无信号"}
+                      {s.source === "okx"
+                        ? ` · 带单 ${s.okx?.leadDays ?? "—"} 天 · 胜率 ${pct(s.okx?.winRatio)}`
+                        : s.lastSignalAt
+                          ? ` · 最近信号 ${timeAgo(s.lastSignalAt)}`
+                          : " · 尚无信号"}
                     </div>
+                    {s.source === "okx" && s.okx?.hidesPositions ? (
+                      <div className="mt-1 text-[11px] text-[#854f0b]">
+                        该带单员隐藏了当前持仓。自建镜像无法跟，但 OKX 原生跟单不受影响——OKX 自己会同步他的成交。
+                      </div>
+                    ) : null}
                   </div>
 
-                  <div className="grid grid-cols-3 gap-5 text-right">
-                    <Mini label="信号" value={String(s.trades ?? 0)} />
-                    <Mini label="跟单人数" value={String(s.followers ?? 0)} />
-                    <Mini label="AUM" value={fmtUsd(s.aum ?? 0, 0)} />
-                  </div>
+                  {s.source === "okx" ? (
+                    <div className="grid grid-cols-3 gap-5 text-right">
+                      <Mini
+                        label="累计收益"
+                        value={pct(s.okx?.pnlRatio, 2)}
+                        tone={Number(s.okx?.pnlRatio) >= 0 ? "up" : "down"}
+                      />
+                      <Mini label="跟单人数" value={String(s.followers ?? 0)} />
+                      <Mini label="AUM" value={fmtUsd(s.aum ?? 0, 0)} />
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-5 text-right">
+                      <Mini label="信号" value={String(s.trades ?? 0)} />
+                      <Mini label="跟单人数" value={String(s.followers ?? 0)} />
+                      <Mini label="AUM" value={fmtUsd(s.aum ?? 0, 0)} />
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-1.5">
                     <button
@@ -250,12 +310,14 @@ export function SourcesClient({
                         <RefreshCw size={13} /> 跑一轮
                       </button>
                     ) : null}
-                    <button
-                      onClick={() => setPublishing(s)}
-                      className="inline-flex h-8 items-center gap-1 rounded-lg border border-border px-2.5 text-[12px] transition hover:bg-surface"
-                    >
-                      <Send size={13} /> 发信号
-                    </button>
+                    {s.source === "okx" ? null : (
+                      <button
+                        onClick={() => setPublishing(s)}
+                        className="inline-flex h-8 items-center gap-1 rounded-lg border border-border px-2.5 text-[12px] transition hover:bg-surface"
+                      >
+                        <Send size={13} /> 发信号
+                      </button>
+                    )}
                     <button
                       onClick={() => del(s.id, s.name)}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-[#f6465d] transition hover:bg-surface"
@@ -335,6 +397,16 @@ export function SourcesClient({
           onDone={(msg) => {
             flash(msg);
             setPublishing(null);
+            router.refresh();
+          }}
+        />
+      ) : null}
+
+      {okxOpen ? (
+        <OkxImportModal
+          onClose={() => setOkxOpen(false)}
+          onDone={(msg) => {
+            flash(msg);
             router.refresh();
           }}
         />
@@ -505,6 +577,327 @@ export function SourcesClient({
 
 /* ------------------------------------------------------------------ */
 
+type OkxRank = {
+  uniqueCode: string;
+  nickName: string;
+  portLink?: string;
+  aum: number;
+  copyTraderNum: number;
+  accCopyTraderNum: number;
+  leadDays: number;
+  pnl: number;
+  roiRatio: number;
+  winRatio: number;
+  traderInsts: string[];
+  ccy: string;
+};
+
+const LEAD_DAYS_OPTIONS: Array<[string, string]> = [
+  ["", "不限带单时长"],
+  ["1", "≥ 7 天"],
+  ["2", "≥ 30 天"],
+  ["3", "≥ 90 天"],
+  ["4", "≥ 180 天"],
+];
+
+const SORT_OPTIONS: Array<[string, string]> = [
+  ["overview", "综合排序"],
+  ["pnl_ratio", "按收益率"],
+  ["pnl", "按累计盈亏"],
+  ["aum", "按管理资金"],
+  ["win_ratio", "按胜率"],
+  ["current_copy_trader_pnl", "按跟单者收益"],
+];
+
+/**
+ * 从 OKX 跟单平台导入真实带单员。
+ *
+ * 这里展示的每一个数字都直接来自 OKX 的公开接口，本地不做任何估算或加工。
+ * 注意 OKX 的收益率/胜率是小数，展示时统一 ×100。
+ */
+function OkxImportModal({ onClose, onDone }: { onClose: () => void; onDone: (msg: string) => void }) {
+  const [ranks, setRanks] = useState<OkxRank[]>([]);
+  const [imported, setImported] = useState<Record<string, string>>({});
+  const [limits, setLimits] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState("");
+  const [importSummary, setImportSummary] = useState<any[]>([]);
+
+  const [sortType, setSortType] = useState("overview");
+  const [minLeadDays, setMinLeadDays] = useState("");
+  const [minAum, setMinAum] = useState("");
+  const [page, setPage] = useState(1);
+  const [dataVer, setDataVer] = useState<string | undefined>(undefined);
+
+  async function load(opts?: { page?: number; sortType?: string; minLeadDays?: string; minAum?: string; dataVer?: string }) {
+    const p = opts?.page ?? page;
+    const s = opts?.sortType ?? sortType;
+    const d = opts?.minLeadDays ?? minLeadDays;
+    const a = opts?.minAum ?? minAum;
+    const v = opts?.dataVer ?? dataVer;
+
+    setLoading(true);
+    setErr("");
+    try {
+      const qs = new URLSearchParams({ limit: "20", page: String(p), sortType: s });
+      if (d) qs.set("minLeadDays", d);
+      if (a) qs.set("minAum", a);
+      if (v) qs.set("dataVer", v);
+
+      const r = await fetch(`/api/okx/traders?${qs}`);
+      const j = await r.json();
+      if (!j.ok) {
+        setErr(j.error ?? "读取失败");
+        setRanks([]);
+      } else {
+        setRanks(j.ranks ?? []);
+        setImported(j.imported ?? {});
+        setLimits(j.limits ?? null);
+        if (j.dataVer) setDataVer(j.dataVer);
+        if (!j.ranks?.length) setErr("这个筛选条件下 OKX 没有返回带单员，放宽条件试试。");
+      }
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    load({ page: 1, dataVer: undefined });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function doImport(codes: string[]) {
+    if (!codes.length) return;
+    setBusy(codes[0]);
+    setErr("");
+    try {
+      const r = await fetch("/api/okx/traders", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ uniqueCodes: codes }),
+      });
+      const j = await r.json();
+      if (!j.ok) {
+        setErr(j.error ?? "导入失败");
+      } else {
+        setImportSummary(j.results ?? []);
+        const okCount = j.imported ?? 0;
+        const failCount = j.failed ?? 0;
+        onDone(failCount ? `导入完成：成功 ${okCount} 个，失败 ${failCount} 个` : `已导入 ${okCount} 个 OKX 带单员`);
+        await load();
+      }
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
+    }
+    setBusy("");
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4" onClick={onClose}>
+      <div className="my-4 w-full max-w-[760px] rounded-3xl border border-border bg-card p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="text-[17px] font-bold">从 OKX 导入带单员</div>
+            <div className="mt-0.5 text-[12.5px] text-muted-foreground">
+              数据直接来自 OKX 跟单平台公开接口，非本地编造。导入后跟单走 OKX 原生引擎。
+            </div>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="block">
+            <span className="text-[12px] font-medium text-muted-foreground">排序</span>
+            <select
+              value={sortType}
+              onChange={(e) => {
+                setSortType(e.target.value);
+                setPage(1);
+                setDataVer(undefined);
+                load({ page: 1, sortType: e.target.value, dataVer: undefined });
+              }}
+              className="input-base mt-1 w-[150px]"
+            >
+              {SORT_OPTIONS.map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-[12px] font-medium text-muted-foreground">带单时长</span>
+            <select
+              value={minLeadDays}
+              onChange={(e) => {
+                setMinLeadDays(e.target.value);
+                setPage(1);
+                setDataVer(undefined);
+                load({ page: 1, minLeadDays: e.target.value, dataVer: undefined });
+              }}
+              className="input-base mt-1 w-[130px]"
+            >
+              {LEAD_DAYS_OPTIONS.map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-[12px] font-medium text-muted-foreground">最低管理资金（USDT）</span>
+            <input
+              value={minAum}
+              onChange={(e) => setMinAum(e.target.value)}
+              onBlur={() => {
+                setPage(1);
+                setDataVer(undefined);
+                load({ page: 1, dataVer: undefined });
+              }}
+              placeholder="不限"
+              className="input-base mt-1 w-[150px]"
+            />
+          </label>
+          <button
+            onClick={() => {
+              setPage(1);
+              setDataVer(undefined);
+              load({ page: 1, dataVer: undefined });
+            }}
+            disabled={loading}
+            className="btn-ghost"
+          >
+            <RefreshCw size={14} /> 刷新
+          </button>
+        </div>
+
+        {limits ? (
+          <div className="mt-3 rounded-2xl border border-border bg-surface/60 px-3.5 py-2.5 text-[11.5px] text-muted-foreground">
+            OKX 跟单限额（实时取自平台）：单笔 {limits.minCopyAmt} ~ {fmtUsd(limits.maxCopyAmt, 0)} ·
+            跟单总额上限 {fmtUsd(limits.maxCopyTotalAmt, 0)} · 跟单比例上限 {limits.maxCopyRatio}% ·
+            止损上限 {(limits.maxSlRatio * 100).toFixed(0)}% · 止盈上限 {(limits.maxTpRatio * 100).toFixed(0)}%
+          </div>
+        ) : null}
+
+        {err ? <p className="mt-3 text-[12.5px] text-[#f6465d]">{err}</p> : null}
+
+        <div className="mt-4 max-h-[50vh] overflow-y-auto rounded-2xl border border-border">
+          {loading ? (
+            <div className="py-12 text-center text-[13px] text-muted-foreground">正在从 OKX 拉取带单员…</div>
+          ) : !ranks.length ? (
+            <div className="py-12 text-center text-[13px] text-muted-foreground">没有可导入的带单员</div>
+          ) : (
+            <div className="divide-y divide-border">
+              {ranks.map((r) => {
+                const already = imported[r.uniqueCode];
+                const isBusy = busy === r.uniqueCode;
+                return (
+                  <div key={r.uniqueCode} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                    {r.portLink ? (
+                      <img src={r.portLink} alt={r.nickName} className="h-9 w-9 shrink-0 rounded-xl object-cover" loading="lazy" />
+                    ) : (
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-wise-mint text-[11px] font-bold text-wise-darkgreen">
+                        {r.nickName.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+
+                    <div className="min-w-[150px] flex-1">
+                      <div className="text-[13.5px] font-semibold">{r.nickName}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        带单 {r.leadDays} 天 · {r.traderInsts?.length ?? 0} 个品种 · <span className="font-mono">{r.uniqueCode}</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4 text-right">
+                      <Mini
+                        label="累计收益"
+                        value={`${r.roiRatio >= 0 ? "+" : ""}${(r.roiRatio * 100).toFixed(2)}%`}
+                        tone={r.roiRatio >= 0 ? "up" : "down"}
+                      />
+                      <Mini label="胜率" value={`${(r.winRatio * 100).toFixed(1)}%`} />
+                      <Mini label="AUM" value={fmtUsd(r.aum, 0)} />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 text-right">
+                      <Mini label="跟单人数" value={`${r.copyTraderNum} / ${r.accCopyTraderNum} 累计`} />
+                    </div>
+
+                    <button
+                      onClick={() => doImport([r.uniqueCode])}
+                      disabled={isBusy}
+                      className={already ? "btn-ghost" : "btn-primary"}
+                    >
+                      {isBusy ? "处理中…" : already ? <><RefreshCw size={13} /> 刷新</> : <><Download size={13} /> 导入</>}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 flex items-center justify-between">
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                const p = Math.max(page - 1, 1);
+                setPage(p);
+                load({ page: p });
+              }}
+              disabled={page <= 1 || loading}
+              className="btn-ghost"
+            >
+              上一页
+            </button>
+            <button
+              onClick={() => {
+                const p = page + 1;
+                setPage(p);
+                load({ page: p });
+              }}
+              disabled={loading || ranks.length < 20}
+              className="btn-ghost"
+            >
+              下一页
+            </button>
+            <span className="self-center text-[12px] text-muted-foreground">第 {page} 页</span>
+          </div>
+          <div className="text-[11.5px] text-muted-foreground">
+            已导入 {Object.keys(imported).length} 个
+          </div>
+        </div>
+
+        {importSummary.length ? (
+          <div className="mt-4 space-y-1.5 rounded-2xl border border-border p-3">
+            {importSummary.map((it: any, i: number) => (
+              <div key={i} className="flex flex-wrap items-center gap-2 text-[12px]">
+                <span className="font-medium">{it.name ?? it.uniqueCode}</span>
+                {it.ok ? (
+                  <>
+                    <span className="text-[#0ecb81]">{it.action === "created" ? "已导入" : "已刷新"}</span>
+                    <span className="text-muted-foreground">
+                      累计收益 {(Number(it.roiTotal) || 0).toFixed(2)}% · 胜率 {(Number(it.winRate) || 0).toFixed(1)}% · 带单 {it.leadDays} 天
+                    </span>
+                    {it.hidesPositions ? (
+                      <span className="text-[#854f0b]">该带单员隐藏持仓（不影响 OKX 原生跟单）</span>
+                    ) : null}
+                  </>
+                ) : (
+                  <span className="text-[#f6465d]">{it.error}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function PublishModal({
   source,
   symbols,
@@ -655,11 +1048,25 @@ function HowCard({ icon: Icon, title, desc }: { icon: any; title: string; desc: 
   );
 }
 
-function Mini({ label, value }: { label: string; value: string }) {
+function Mini({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  /** 涨跌配色与全站保持一致：涨绿跌红 */
+  tone?: "up" | "down";
+}) {
   return (
     <div>
       <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className="num text-[13.5px] font-semibold">{value}</div>
+      <div
+        className="num text-[13.5px] font-semibold"
+        style={tone ? { color: tone === "up" ? "#0ecb81" : "#f6465d" } : undefined}
+      >
+        {value}
+      </div>
     </div>
   );
 }
