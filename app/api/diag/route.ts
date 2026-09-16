@@ -22,6 +22,14 @@ const TARGETS: Array<{ name: string; url: string }> = [
   { name: "币安 备用域名3", url: "https://fapi3.binance.com/fapi/v1/time" },
   { name: "OKX 公共行情", url: "https://www.okx.com/api/v5/public/time" },
   { name: "OKX 备用域名", url: "https://aws.okx.com/api/v5/public/time" },
+  {
+    name: "OKX 跟单·带单员排行",
+    url: "https://www.okx.com/api/v5/copytrading/public-lead-traders?instType=SWAP&limit=1",
+  },
+  {
+    name: "OKX 跟单·带单员持仓",
+    url: "https://www.okx.com/api/v5/copytrading/public-current-subpositions?uniqueCode=F2BCA22ABBB69F57&instType=SWAP",
+  },
   { name: "Bybit 公共行情", url: "https://api.bybit.com/v5/market/time" },
   { name: "Gate 公共行情", url: "https://api.gateio.ws/api/v4/spot/time" },
 ];
