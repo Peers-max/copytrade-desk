@@ -42,17 +42,31 @@ function normalizeAction(v: any): "OPEN" | "CLOSE" | "ADD" | "REDUCE" {
   return "OPEN";
 }
 
-/** 把 "BTCUSDT" / "BTC-USDT-SWAP" 之类的写法统一成 "BTC/USDT" */
+/**
+ * 把各来源的写法统一成 "BASE/QUOTE"。必须覆盖的真实来源：
+ *   - TradingView 现货预警：{{ticker}} = "BTCUSDT"
+ *   - TradingView 永续预警：{{ticker}} = "BTCUSDT.P"   ← 加密永续用户的标准写法
+ *   - 手工 / 其他平台：BTC-USDT-SWAP、ETHUSDT_PERP、BINANCE:BTCUSDT
+ */
 function normalizeSymbol(v: any): string {
-  const raw = String(v ?? "").trim().toUpperCase();
+  let raw = String(v ?? "").trim().toUpperCase();
   if (!raw) return "";
+
+  // 1. 去掉交易所前缀：BINANCE:BTCUSDT → BTCUSDT
+  if (raw.includes(":")) raw = raw.split(":").pop() || raw;
   if (raw.includes("/")) return raw;
+
+  // 2. 去掉合约后缀：BTCUSDT.P / BTC-USDT-SWAP / ETHUSDT_PERP → 基础符号
+  raw = raw.replace(/(PERPETUAL|PERP|SWAP|P)$/, "").replace(/[._-]+$/, "");
+
+  // 3. 剩余的分隔符按 BASE-QUOTE 处理
   if (raw.includes("-")) {
     const [b, q] = raw.split("-");
-    return `${b}/${q}`;
+    return q ? `${b}/${q}` : `${b}/USDT`;
   }
+
   for (const q of ["USDT", "USDC"]) {
-    if (raw.endsWith(q)) return `${raw.slice(0, -q.length)}/${q}`;
+    if (raw.endsWith(q) && raw.length > q.length) return `${raw.slice(0, -q.length)}/${q}`;
   }
   return `${raw}/USDT`;
 }
