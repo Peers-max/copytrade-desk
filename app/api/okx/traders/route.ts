@@ -7,6 +7,7 @@ import {
   fetchPublicConfig,
   okxKey,
   rankToTrader,
+  traderToRank,
   RANK_MAX_LIMIT,
   type LeadRank,
   type LeadRankQuery,
@@ -16,7 +17,7 @@ import type { OkxInstType, Trader } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 /**
- * OKX 带单员名册：浏览 / 导入 / 全量同步。
+ * OKX 带单员名册：浏览 / 导入 / 全量同步 / 存量瘦身。
  *
  * 这是「跟单列表里的交易员从哪来」的答案 —— 不再由本地编造，而是直接取自
  * OKX 官方跟单平台的公开排行榜，业绩数据（AUM / 跟单人数 / 收益率 / 胜率 /
@@ -25,6 +26,7 @@ export const dynamic = "force-dynamic";
  *   GET  /api/okx/traders?instType=SWAP&limit=20&page=1&sortType=pnl_ratio
  *   POST /api/okx/traders   { uniqueCodes: [...], instType }            按 code 导入
  *   POST /api/okx/traders   { mode: "sync", instType, page, dataVer? }  全量同步的一批
+ *   POST /api/okx/traders   { mode: "compact" }                        存量瘦身（见下）
  *
  * ## 全量同步为什么必须分批
  *
@@ -36,6 +38,17 @@ export const dynamic = "force-dynamic";
  *
  * 实测 99 个 uniqueCode 在 SWAP / SPOT 两册里重复出现，但它们是**两个不同的带单产品**
  * （AUM、收益、品种全不同）。只按 uniqueCode 匹配会让两者互相覆盖，所以统一走 `okxKey()`。
+ *
+ * ## 为什么要有一个 compact 模式
+ *
+ * 早期版本把 OKX 原始字段「顺手全存」了（`okx.traderInsts` 平均 204 个 / 人、
+ * `okx.curve`、`okx.portLink`），414 条把整库顶到 1.8 MB。
+ * 每次请求 `readDB()` 都要整库 `JSON.parse`，直接超出 Worker CPU 预算
+ * → Cloudflare `error code 1102`，整站间歇 503。
+ *
+ * 存储侧已经在 `rankToTrader` 里改好了；但**已经落盘的 414 条老记录还得重写一遍**。
+ * 全量同步当然能覆盖，不过那次只处理榜单当前在册的人，掉榜的就永远带着冗余字段。
+ * `mode:"compact"` 就地重写所有 okx 记录，不依赖网络、一次整库写入，专门用来修这个事故。
  *
  * 仅站主可用。
  */
@@ -273,6 +286,45 @@ export async function POST(req: NextRequest) {
       // 满页说明后面大概率还有；不满页 = 到底了
       hasMore: res.ranks.length >= RANK_MAX_LIMIT,
       names: names.slice(0, 6),
+    });
+  }
+
+  /* ============ 模式三：存量瘦身 ============ */
+  // 就地重写所有 okx 记录，把多余的 okx.traderInsts / okx.curve / okx.portLink 去掉。
+  // 不请求 OKX、不依赖网络，一次整库写入，专门用来修「整库过大 → Worker 1102」。
+  if (b?.mode === "compact") {
+    let scanned = 0;
+    let slimmed = 0;
+    let beforeBytes = 0;
+    let afterBytes = 0;
+
+    await mutate<Trader>("traders", (rows) =>
+      rows.map((t) => {
+        if (t.source !== "okx" || !t.okx?.uniqueCode) return t;
+        scanned++;
+
+        const rank = traderToRank(t);
+        if (!rank) return t;
+
+        const slim = rankToTrader(rank, t);
+        // ⚠️ traderToRank 还原不出原始 instId 列表（那正是要丢掉的字段），
+        // 所以必须把已有的品种表覆盖回去，否则全被降级成兜底的 BTC/USDT。
+        if (Array.isArray(t.symbols) && t.symbols.length) slim.symbols = t.symbols;
+
+        beforeBytes += JSON.stringify(t).length;
+        afterBytes += JSON.stringify(slim).length;
+        slimmed++;
+        return slim;
+      })
+    );
+
+    return NextResponse.json({
+      ok: true,
+      mode: "compact",
+      scanned,
+      slimmed,
+      beforeKB: Math.round(beforeBytes / 1024),
+      afterKB: Math.round(afterBytes / 1024),
     });
   }
 

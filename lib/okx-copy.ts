@@ -443,6 +443,42 @@ function instToSymbol(instId: string): string {
 }
 
 /**
+ * ⚠️ 体积事故备忘（2026-09，实测数据，别删这段）。
+ *
+ * 全量导入 414 个 OKX 带单员后整站间歇 503，响应体是 Cloudflare Worker
+ * `error code: 1102`（CPU 时间超限）。根因不是曲线，而是下面这几个「顺手存全量」的字段：
+ *
+ *   实测单条 Trader ≈ 4484 B，414 条仅 traders 一张表就 1813 KB，
+ *   每次请求 readDB() 都要把它整库 JSON.parse 一遍，直接超出 Worker CPU 预算。
+ *
+ *   字段体积占比：
+ *     okx.traderInsts[]   1305 KB（72%）—— 平均 204 个 instId / 人，最多 279 个
+ *     okx.curve[]           78 KB —— 与 trader.curve 完全重复
+ *     okx.portLink        33.5 KB —— 与 trader.avatarUrl 完全重复
+ *
+ * 结论：**只存列表真正会渲染的东西**。
+ *   - 品种表 → 去重后的 symbols（上限 SYMBOL_LIMIT），不存原始 instId 列表
+ *   - 曲线   → 只留最近 CURVE_POINTS 个点，且只存一份（trader.curve）
+ *   - 头像   → 只存一份（trader.avatarUrl）
+ *   - 数值   → 压缩位数后再转字符串，别 String(全精度浮点)
+ * 改完单条约 918 B（−80%），整库回到 400 KB 级。
+ */
+export const CURVE_POINTS = 30;
+
+/** 存储用品种上限。列表只展示前 3 个 + 总数，8 个足够。 */
+export const SYMBOL_LIMIT = 8;
+
+/** 压到 4 位小数。收益率/胜率展示只到 2 位，全精度存盘纯属浪费。 */
+function round4(x: number): number {
+  return Math.round(x * 10000) / 10000;
+}
+
+/** 曲线裁剪：只留最近 N 个点 + 压到 2 位小数（列表的 sparkline 只画 slice(-28)）。 */
+function trimCurve(c: number[]): number[] {
+  return c.slice(-CURVE_POINTS).map((x) => Math.round(x * 100) / 100);
+}
+
+/**
  * 带单员 → Trader。
  * 所有统计字段都直接用 OKX 的真实数据，不做任何本地估算。
  * 传 existing 表示这是一次「刷新」，此时保留本地字段（id / status / note / createdAt）。
@@ -450,22 +486,24 @@ function instToSymbol(instId: string): string {
 export function rankToTrader(rank: LeadRank, existing?: Trader | null): Trader {
   const symbols = Array.from(
     new Set(rank.traderInsts.map(instToSymbol).filter((s) => s.includes("/")))
-  ).slice(0, 12);
+  ).slice(0, SYMBOL_LIMIT);
 
   const meta: OkxLeadMeta = {
     uniqueCode: rank.uniqueCode,
     instType: rank.instType,
     nickName: rank.nickName,
-    pnlRatio: String(rank.roiRatio),
-    pnl: String(rank.pnl),
-    aum: String(rank.aum),
-    winRatio: String(rank.winRatio),
-    leadDays: String(rank.leadDays),
-    copyTraderNum: String(rank.copyTraderNum),
-    accCopyTraderNum: String(rank.accCopyTraderNum),
-    portLink: rank.portLink,
-    traderInsts: rank.traderInsts,
-    curve: rank.curve,
+    // ⚠️ 先压缩再转字符串。直接 String(9.357147985851827) 会存成 18 个字符，
+    // 414 条下来白白多出几十 KB —— 见上面「体积事故备忘」。
+    pnlRatio: String(round4(rank.roiRatio)),
+    winRatio: String(round4(rank.winRatio)),
+    pnl: String(Math.round(rank.pnl)),
+    aum: String(Math.round(rank.aum)),
+    leadDays: String(Math.round(rank.leadDays)),
+    copyTraderNum: String(Math.round(rank.copyTraderNum)),
+    accCopyTraderNum: String(Math.round(rank.accCopyTraderNum)),
+    // 头像不在这里重复存 —— Trader.avatarUrl 已经有一份。
+    // 同理 traderInsts / okx.curve 一律不落盘，原因见 OkxLeadMeta 上的说明。
+    //
     // 已知的本地探测结果优先；否则用这次 rank 上带的（按 code 单个导入时会探测）
     hidesPositions: existing?.okx?.hidesPositions ?? rank.hidesPositions,
     syncedAt: Date.now(),
@@ -490,9 +528,10 @@ export function rankToTrader(rank: LeadRank, existing?: Trader | null): Trader {
     trades: 0,
     avgHold: "—",
     verified: true,
-    // 曲线只用于画 sparkline，保留 2 位小数即可。
-    // 不做这一步的话，JS 浮点全精度（0.11030000000000001）会让 300+ 条记录的 SSR 体积膨胀约 3 倍。
-    curve: rank.curve.map((x) => Math.round(x * 100 * 100) / 100),
+    // 曲线只用于画 sparkline（组件里是 curve.slice(-28)），
+    // 所以只留最近 CURVE_POINTS 个点并压到 2 位小数。
+    // 不做这一步的话：浮点全精度（0.11030000000000001）+ 整段历史，会让整库体积失控。
+    curve: trimCurve(rank.curve),
     tags: ["OKX 官方", `${instLabel(rank.instType)}带单`, rank.ccy],
 
     source: "okx",
@@ -514,6 +553,46 @@ export function rankToTrader(rank: LeadRank, existing?: Trader | null): Trader {
 /** 品类的中文标签，用于列表展示。 */
 export function instLabel(t: OkxInstType): string {
   return t === "SPOT" ? "现货" : "合约";
+}
+
+/**
+ * `rankToTrader` 的逆运算：把本地存档还原成 LeadRank。
+ *
+ * 存在的意义：**存量瘦身**。
+ * 已经落盘的老记录带着 traderInsts / okx.curve / okx.portLink 这些冗余字段
+ * （正是 1102 体积事故的主因），要修好线上就必须重写它们。
+ * 走一遍 OKX 全量同步当然也能覆盖，但那样得再打 21 次外部请求、还受榜单漂移影响；
+ * 这里直接用本地已有数据还原，一次整库写入即可，不依赖网络。
+ *
+ * ⚠️ 还原不出原始 instId 列表（那正是要丢掉的字段），所以 `traderInsts` 给空数组 ——
+ * 调用方必须自己把已有的 `trader.symbols` 覆盖回去，否则品种会被降级成兜底的 BTC/USDT。
+ */
+export function traderToRank(t: Trader): LeadRank | null {
+  const m = t.okx;
+  if (!m?.uniqueCode) return null;
+
+  const instType: OkxInstType = m.instType === "SPOT" ? "SPOT" : DEFAULT_INST_TYPE;
+  const roi = Number(m.pnlRatio);
+
+  return {
+    uniqueCode: m.uniqueCode,
+    instType,
+    nickName: m.nickName ?? t.name,
+    portLink: t.avatarUrl,
+    aum: Number(m.aum ?? t.aum ?? 0),
+    copyTraderNum: Number(m.copyTraderNum ?? t.followers ?? 0),
+    accCopyTraderNum: Number(m.accCopyTraderNum ?? 0),
+    maxCopyTraderNum: 0,
+    leadDays: Number(m.leadDays ?? 0),
+    pnl: Number(m.pnl ?? 0),
+    // 老记录里 pnlRatio 可能被丢过；退回 trader.roiTotal（本项目口径 = 小数 × 100）
+    roiRatio: Number.isFinite(roi) ? roi : (t.roiTotal ?? 0) / 100,
+    winRatio: Number.isFinite(Number(m.winRatio)) ? Number(m.winRatio) : (t.winRate ?? 0) / 100,
+    // trader.curve 存的是「×100 后的百分比」，这里除回去还原成 OKX 的小数口径
+    curve: Array.isArray(t.curve) ? t.curve.map((x) => Number(x) / 100) : [],
+    traderInsts: [],
+    ccy: t.tags?.[2] ?? "USDT",
+  };
 }
 
 /**

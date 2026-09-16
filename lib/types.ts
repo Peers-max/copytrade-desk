@@ -178,11 +178,29 @@ export type OkxLeadMeta = {
   accCopyTraderNum?: string;
   /** 可跟单人数上限 */
   maxCopyTraderNum?: string;
-  /** 头像 URL */
+  /**
+   * 头像 URL。
+   *
+   * ⚠️ **不再落盘**（2026-09 起）。它和 `Trader.avatarUrl` 是同一个值，
+   * 414 条带单员重复存两份白白多出 33.5 KB。老记录里可能还有残留，瘦身时会被清掉。
+   */
   portLink?: string;
-  /** 带单员的交易品种（instId 形式，如 BTC-USDT-SWAP） */
+  /**
+   * 带单员的交易品种（instId 形式，如 BTC-USDT-SWAP）。
+   *
+   * ⚠️ **禁止落盘 —— 这是 1102 体积事故的元凶**。
+   * 实测平均 204 个品种 / 人（最多 279 个），414 条光这一个字段就是 **1305 KB**，
+   * 占整库 72%，直接把 Cloudflare Worker 的 CPU 预算撑爆（`error code: 1102`，整站 503）。
+   * 列表需要的只是去重后的交易对，已经存在 `Trader.symbols` 里，所以这里一律不存。
+   * 只在 `rankToTrader` 内部作为中间量使用。
+   */
   traderInsts?: string[];
-  /** 收益率历史曲线（小数数组），已按时间正序整理 */
+  /**
+   * 收益率历史曲线（小数数组），已按时间正序整理。
+   *
+   * ⚠️ **不再落盘**（2026-09 起）。落盘的那一份是 `Trader.curve`
+   * （同一数组、且已是 ×100 的百分比口径），这里重复存等于白占 78 KB。
+   */
   curve?: number[];
   /**
    * 该带单员是否隐藏了当前持仓。

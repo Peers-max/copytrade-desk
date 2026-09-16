@@ -17,6 +17,7 @@ import {
   ShieldAlert,
   Trash2,
   Webhook,
+  Wrench,
   X,
   Zap,
 } from "lucide-react";
@@ -809,6 +810,8 @@ function OkxImportModal({ onClose, onDone }: { onClose: () => void; onDone: (msg
   });
   /** 用于中途停止全量同步 */
   const abortRef = useRef(false);
+  /** 存量瘦身进行中 */
+  const [compacting, setCompacting] = useState(false);
 
   async function load(opts?: {
     page?: number;
@@ -918,9 +921,26 @@ function OkxImportModal({ onClose, onDone }: { onClose: () => void; onDone: (msg
         if (!j.hasMore) break;
       }
 
+      // 同步只覆盖「榜单当前在册」的带单员，掉榜的老记录还会带着冗余字段。
+      // 统一瘦身一次，避免整库体积再次撑爆 Worker 的 CPU 预算（error 1102）。
+      let compactNote = "";
+      try {
+        const cr = await fetch("/api/okx/traders", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mode: "compact" }),
+        });
+        const cj = await cr.json();
+        if (cj?.ok && cj.beforeKB > cj.afterKB) {
+          compactNote = `；顺带瘦身 ${cj.beforeKB}KB → ${cj.afterKB}KB`;
+        }
+      } catch {
+        /* 瘦身失败不影响同步结果本身 */
+      }
+
       setSyncState((s) => ({ ...s, running: false, note: `完成，共处理 ${cur} 个` }));
       onDone(
-        `${instType === "SPOT" ? "现货" : "合约"}带单员同步完成：新增 ${created} 个，更新 ${updated} 个。` +
+        `${instType === "SPOT" ? "现货" : "合约"}带单员同步完成：新增 ${created} 个，更新 ${updated} 个${compactNote}。` +
           `存储是最终一致的，列表若没立刻变，过十几秒点「刷新」即可。`
       );
       // KV 写后读有延迟（最长约 60 秒），立刻回读大概率还是旧值
@@ -930,6 +950,42 @@ function OkxImportModal({ onClose, onDone }: { onClose: () => void; onDone: (msg
       setErr(String(e?.message ?? e));
       setSyncState((s) => ({ ...s, running: false, note: "同步出错" }));
     }
+  }
+
+  /**
+   * 存量瘦身：就地重写所有 OKX 记录，去掉冗余的 okx.traderInsts / okx.curve / okx.portLink。
+   *
+   * 为什么需要它：早期版本把 OKX 原始字段全量落盘，414 条把整库顶到 1.8 MB，
+   * 每次请求 readDB() 都要整库 JSON.parse，超出 Cloudflare Worker 的 CPU 预算
+   * → error code 1102，整站间歇 503。
+   * 全量同步会覆盖「榜单当前在册」的人，掉榜的老记录只能靠这里清干净。
+   */
+  async function doCompact() {
+    setCompacting(true);
+    setErr("");
+    try {
+      const r = await fetch("/api/okx/traders", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "compact" }),
+      });
+      const j = await r.json();
+      if (!j.ok) {
+        setErr(j.error ?? "瘦身失败");
+      } else {
+        onDone(
+          j.beforeKB > j.afterKB
+            ? `存量数据已瘦身：${j.beforeKB}KB → ${j.afterKB}KB（处理 ${j.slimmed} 条）`
+            : `存量数据已经很干净，无需瘦身（检查 ${j.scanned} 条）`
+        );
+        // KV 写后读有延迟，等一会儿再回读
+        await new Promise((r) => setTimeout(r, 2500));
+        await load();
+      }
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
+    }
+    setCompacting(false);
   }
 
   async function doImport(codes: string[]) {
@@ -1006,6 +1062,14 @@ function OkxImportModal({ onClose, onDone }: { onClose: () => void; onDone: (msg
                 <X size={14} /> 停止
               </button>
             ) : null}
+            <button
+              onClick={doCompact}
+              disabled={syncState.running || compacting}
+              className="btn-ghost"
+              title="就地清理 OKX 记录里的冗余字段。整库过大时会超出 Worker 的 CPU 预算，导致整站 503（error code 1102）。"
+            >
+              <Wrench size={14} /> {compacting ? "瘦身中…" : "存量瘦身"}
+            </button>
             <button onClick={syncAll} disabled={syncState.running} className="btn-primary">
               <Download size={14} /> 全部导入（{instType === "SPOT" ? "现货" : "合约"}）
             </button>

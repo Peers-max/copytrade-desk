@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "cf:seed": "node scripts/seed-kv.mjs",
     "cf:backup": "node scripts/backup-kv.mjs",
+    "cf:slim": "node scripts/slim-kv.mjs",
     "cf:purge": "node scripts/purge-kv.mjs",
     "cf:build": "opennextjs-cloudflare build",
     "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",

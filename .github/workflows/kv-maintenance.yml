@@ -1,0 +1,65 @@
+name: KV Maintenance (slim)
+
+# 线上 Workers KV 体积维护。
+#
+# 为什么需要它：
+#   应用把整个数据库存在 KV 的单个键 `db:v2` 上（见 lib/store.ts），
+#   每个请求都要把它整库 JSON.parse 一遍。一旦这个键过大（实测约 1.8 MB 就会出事），
+#   解析开销会超出 Worker 的 CPU 预算，全站读库路径返回 `error code: 1102`（503）。
+#
+#   ⚠️ 关键：应用内的修复接口 `POST /api/okx/traders {mode:"compact"}` 本身也要读库，
+#   所以站点一旦进入 1102 状态，它自己也调用不起来 —— 只能从这个工作流绕开 Worker、
+#   用 REST API 直连 KV 修。这就是本工作流存在的唯一理由。
+#
+# 用法：Actions → KV Maintenance (slim) → Run workflow
+#   apply 不勾选 = 只体检，打印体积报告与估值，不写入（建议先跑一次）
+#   apply 勾选   = 备份后写回
+#
+# 需要仓库 Secrets：CLOUDFLARE_API_TOKEN、CLOUDFLARE_ACCOUNT_ID
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "真正写回 KV（不勾选则只体检、不写入）"
+        type: boolean
+        default: false
+
+concurrency:
+  group: kv-maintenance
+  cancel-in-progress: false
+
+jobs:
+  slim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Slim KV
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ "${{ inputs.apply }}" = "true" ]; then
+            node scripts/slim-kv.mjs --apply
+          else
+            echo "::notice::体检模式（未写回）。确认报告无误后，勾选 apply 再跑一次。"
+            node scripts/slim-kv.mjs
+          fi
+
+      # 无论成败都把写回前的原始快照留档，方便回滚
+      - name: Upload backup artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kv-backup-${{ github.run_number }}
+          path: .data/backup/
+          if-no-files-found: ignore
+          retention-days: 30
