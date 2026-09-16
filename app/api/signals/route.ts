@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { all } from "@/lib/db";
+import { all, remove } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth";
 import { bootstrapIfNeeded } from "@/lib/seed";
 import type { Signal } from "@/lib/types";
 
@@ -25,4 +26,39 @@ export async function GET(req: NextRequest) {
 
   signals = signals.sort((a, b) => b.ts - a.ts).slice(0, limit);
   return NextResponse.json({ ok: true, signals });
+}
+
+/**
+ * 删除信号记录（仅站主）。
+ *
+ * 用途：接入调试、Webhook 联调、误发信号之后清理痕迹。
+ * 只删「信号流」这一张记录表，不碰成交记录（trades）与跟单关系。
+ *
+ *   DELETE /api/signals?id=sg_xxx        删单条
+ *   DELETE /api/signals?traderId=tr_xxx  删某个信号源的全部信号
+ *   DELETE /api/signals?all=1            清空全部信号
+ */
+export async function DELETE(req: NextRequest) {
+  const admin = await requireAdmin();
+  if (!admin) return NextResponse.json({ ok: false, error: "需要站主权限" }, { status: 403 });
+
+  const id = req.nextUrl.searchParams.get("id");
+  const traderId = req.nextUrl.searchParams.get("traderId");
+  const allFlag = req.nextUrl.searchParams.get("all");
+
+  if (!id && !traderId && !allFlag) {
+    return NextResponse.json(
+      { ok: false, error: "请指定 id、traderId 或 all=1" },
+      { status: 400 },
+    );
+  }
+
+  const before = (await all<Signal>("signals")).length;
+
+  if (id) await remove("signals", (s: any) => s.id === id);
+  else if (traderId) await remove("signals", (s: any) => s.traderId === traderId);
+  else if (allFlag) await remove("signals", () => true);
+
+  const after = (await all<Signal>("signals")).length;
+  return NextResponse.json({ ok: true, deleted: before - after, remaining: after });
 }
