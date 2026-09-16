@@ -16,6 +16,9 @@
  * 用法（真正写回）：
  *   CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=yyy node scripts/slim-kv.mjs --apply
  *
+ * 用法（超过阈值才写回 —— 部署流水线用这个，避免每次部署都白写一遍 KV）：
+ *   CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=yyy node scripts/slim-kv.mjs --max-kb=1024 --apply
+ *
  * 产出：写回前会先把原始内容备份到 .data/backup/online-db-<时间戳>.json
  *
  * 清理规则（与 lib/okx-copy.ts 的 rankToTrader 保持一致，只是就地裁剪、不重建记录）：
@@ -102,6 +105,9 @@ export function slimDB(db) {
 
 async function main() {
   const APPLY = process.argv.includes("--apply");
+  // 阈值：整库小于这个值就直接跳过写回。部署流水线里靠它做到「只在出问题时动手」。
+  const maxKbArg = process.argv.find((a) => a.startsWith("--max-kb="));
+  const MAX_KB = maxKbArg ? Number(maxKbArg.split("=")[1]) || 0 : 0;
 
   const ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
   const API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
@@ -171,6 +177,11 @@ async function main() {
   if (slim.traders.length !== allTraders.length) {
     console.error(`\n✗ traders 条数变化（${allTraders.length} → ${slim.traders.length}），已中止，不写入。`);
     process.exit(1);
+  }
+
+  if (MAX_KB > 0 && raw.length / 1024 <= MAX_KB) {
+    console.log(`\n整库已在阈值内（${kb(raw)} ≤ ${MAX_KB} KB），跳过写回。`);
+    process.exit(0);
   }
 
   if (!APPLY) {

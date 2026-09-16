@@ -37,3 +37,23 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
+
+      # 体积护栏：本站把整个数据库存在 KV 的单个键上，每个请求都要整库 JSON.parse。
+      # 这个键一旦过大就会超出 Worker 的 CPU 预算，全站读库路径直接 503（error code 1102）。
+      # 这里设一个闸门：只在超过阈值时才写回，正常情况（约 400 KB）会直接跳过、零副作用。
+      # continue-on-error：维护动作失败绝不能拖垮部署本身。
+      - name: Guard — slim KV if oversized
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/slim-kv.mjs --max-kb=1024 --apply
+
+      - name: Upload KV backup artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kv-backup-run-${{ github.run_number }}
+          path: .data/backup/
+          if-no-files-found: ignore
+          retention-days: 14
