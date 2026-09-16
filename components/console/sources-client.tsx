@@ -73,7 +73,7 @@ export function SourcesClient({
   const [q, setQ] = useState("");
   const [srcFilter, setSrcFilter] = useState<"all" | "okx" | "quant" | "webhook" | "manual">("all");
   const [instFilter, setInstFilter] = useState<"all" | OkxInstType>("all");
-  const [sortBy, setSortBy] = useState<"aum" | "roi" | "days" | "recent">("recent");
+  const [sortBy, setSortBy] = useState<"aum" | "roi" | "days" | "recent">("aum");
   const [listPage, setListPage] = useState(1);
   const LIST_PAGE_SIZE = 20;
 
@@ -919,7 +919,12 @@ function OkxImportModal({ onClose, onDone }: { onClose: () => void; onDone: (msg
       }
 
       setSyncState((s) => ({ ...s, running: false, note: `完成，共处理 ${cur} 个` }));
-      onDone(`${instType === "SPOT" ? "现货" : "合约"}带单员同步完成：新增 ${created} 个，更新 ${updated} 个`);
+      onDone(
+        `${instType === "SPOT" ? "现货" : "合约"}带单员同步完成：新增 ${created} 个，更新 ${updated} 个。` +
+          `存储是最终一致的，列表若没立刻变，过十几秒点「刷新」即可。`
+      );
+      // KV 写后读有延迟（最长约 60 秒），立刻回读大概率还是旧值
+      await new Promise((r) => setTimeout(r, 2500));
       await load();
     } catch (e: any) {
       setErr(String(e?.message ?? e));
